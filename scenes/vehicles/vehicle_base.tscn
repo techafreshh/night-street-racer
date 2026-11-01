@@ -1,6 +1,8 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/vehicles/vehicle_controller.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/vehicles/chase_camera.gd" id="2"]
+[ext_resource type="Script" path="res://scripts/vehicles/assists.gd" id="3"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_1"]
 size = Vector3(1.8, 0.5, 4.2)
@@ -85,3 +87,13 @@ mesh = SubResource("CylinderMesh_1")
 position = Vector3(0.85, -0.27, 1.35)
 rotation = Vector3(0, 0, 1.5707964)
 mesh = SubResource("CylinderMesh_1")
+
+[node name="ChaseCamera" type="Camera3D" parent="."]
+position = Vector3(0, 3, 7)
+rotation = Vector3(-0.35, 0, 0)
+current = true
+fov = 70.0
+script = ExtResource("2")
+
+[node name="Assists" type="Node" parent="."]
+script = ExtResource("3")
