@@ -402,6 +402,8 @@ func _physics_process(delta: float) -> void:
 	# Automatic gearbox with shift hysteresis from vehicle speed.
 	var wheel_rps := absf(forward_speed) / (TAU * wheel_radius)
 	engine_rpm = maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0)
+	if forward_speed < -0.1:
+		engine_rpm = -engine_rpm
 	_shift_cooldown -= delta
 	if not _reversing and _shift_cooldown <= 0.0:
 		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm:
