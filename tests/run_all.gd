@@ -61,6 +61,7 @@ func _run_all() -> void:
 		"test_export_presets_targets",
 		"test_tune_values_in_range",
 		"test_cornering_g_envelope_0_8_to_1_4g",
+		"test_light_budget_max_8_omnis_per_mesh",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -848,6 +849,75 @@ func test_player_input_bridge() -> bool:
 	await process_frame
 	await physics_frame
 	_make_ground()
+	return true
+
+func test_light_budget_max_8_omnis_per_mesh() -> bool:
+	var packed = load("res://scenes/city/district_night.tscn")
+	check(packed is PackedScene, "district_night.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "district night instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "DistrictNight", "district night root node is DistrictNight")
+	root.add_child(instance)
+	await process_frame
+	var envs := instance.find_children("*", "WorldEnvironment", true, false)
+	check(envs.size() == 1, "scene contains exactly one WorldEnvironment (%d)" % envs.size())
+	if envs.size() == 1:
+		var env: Environment = (envs[0] as WorldEnvironment).environment
+		check(env != null, "WorldEnvironment has an Environment")
+		if env != null:
+			check(env.glow_enabled == true, "night environment has glow enabled")
+			check(env.sky != null, "night environment has a sky")
+			if env.sky != null and env.sky.sky_material is PanoramaSkyMaterial:
+				var pano := (env.sky.sky_material as PanoramaSkyMaterial).panorama
+				check(pano != null, "panorama sky texture is set")
+			else:
+				check(false, "night sky uses a PanoramaSkyMaterial")
+	check(ResourceLoader.exists("res://assets/city/night_sky.hdr"), "night_sky.hdr is vendored")
+	var suns := instance.find_children("*", "DirectionalLight3D", true, false)
+	check(suns.size() == 1, "scene contains exactly one DirectionalLight3D (%d)" % suns.size())
+	var omnis := instance.find_children("*", "OmniLight3D", true, false)
+	check(omnis.size() <= 8, "scene total omnis stay in budget (%d)" % omnis.size())
+	var meshes := instance.find_children("*", "MeshInstance3D", true, false)
+	check(meshes.size() > 0, "district night has meshes (%d)" % meshes.size())
+	var emissive := 0
+	for node in meshes:
+		var mi := node as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for i in mi.mesh.get_surface_count():
+			var mat: Material = mi.mesh.surface_get_material(i)
+			if mat == null:
+				mat = mi.get_surface_override_material(i)
+			if mat is StandardMaterial3D and (mat as StandardMaterial3D).emission_enabled:
+				emissive += 1
+	check(emissive >= 1, "at least one emissive StandardMaterial3D dresses the scene (%d meshes)" % emissive)
+	var worst := 0
+	var worst_name := ""
+	for node in meshes:
+		var mi := node as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		var aabb: AABB = mi.mesh.get_aabb()
+		var center: Vector3 = mi.global_transform * aabb.get_center()
+		var radius: float = aabb.size.length() * 0.5
+		var count := 0
+		for light in omnis:
+			var omni := light as OmniLight3D
+			if omni == null:
+				continue
+			if omni.global_position.distance_to(center) <= omni.omni_range + radius:
+				count += 1
+		if count > worst:
+			worst = count
+			worst_name = str(mi.name)
+		check(count <= 8, "mesh %s sees %d omnis (budget 8)" % [str(mi.name), count])
+	check(worst <= 8, "worst mesh sees %d omnis (%s)" % [worst, worst_name])
+	root.remove_child(instance)
+	instance.free()
 	return true
 
 func test_steer_turns_at_speed() -> bool:
