@@ -328,9 +328,31 @@ func _physics_process(delta: float) -> void:
 	if _throttle > 0.05:
 		_reversing = false
 
-	# Engine force from the torque curve at the current rpm and gear.
-	# Zero while fuel_cut holds because _sample_torque returns 0 at/above redline.
+	# Automatic gearbox with shift hysteresis from vehicle speed. Resolved
+	# before drive force so engine_rpm/shift state and engine_force_total
+	# (via _sample_torque(engine_rpm)) describe the same tick; any future
+	# limiter derived from engine_rpm then agrees with the applied force
+	# within one frame. Pre-shift ratio is kept for both rpm and force on
+	# shift frames (the shift takes effect next tick).
+	# Gearbox over-rev cap: clamp the readout before the shift block reads it.
 	var gear_ratio: float = gear_ratios[clampi(current_gear - 1, 0, gear_ratios.size() - 1)]
+	var wheel_rps := absf(forward_speed) / (TAU * wheel_radius)
+	engine_rpm = clampf(maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0), 800.0, max_engine_rpm)
+	if forward_speed < -0.1:
+		engine_rpm = -engine_rpm
+	fuel_cut = engine_rpm >= redline_rpm
+	_shift_cooldown -= delta
+	if not _reversing and _shift_cooldown <= 0.0:
+		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm:
+			current_gear += 1
+			_shift_cooldown = 0.4
+		elif current_gear > 1 and engine_rpm < shift_down_rpm:
+			current_gear -= 1
+			_shift_cooldown = 0.4
+
+	# Engine force from the torque curve at the current rpm and gear.
+	# engine_rpm above is already this tick's readout, so the force is fresh.
+	# Zero while fuel_cut holds because _sample_torque returns 0 at/above redline.
 	var engine_force_total := _throttle * _sample_torque(engine_rpm) * gear_ratio * final_drive / wheel_radius
 	var driven_count := _driven_wheel_count()
 
@@ -412,22 +434,6 @@ func _physics_process(delta: float) -> void:
 	apply_central_force(drag_force)
 	if absf(forward_speed) > 0.1:
 		apply_central_force(-fwd * signf(forward_speed) * rolling_resistance)
-
-	# Automatic gearbox with shift hysteresis from vehicle speed.
-	# Gearbox over-rev cap: clamp the readout before the shift block reads it.
-	var wheel_rps := absf(forward_speed) / (TAU * wheel_radius)
-	engine_rpm = clampf(maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0), 800.0, max_engine_rpm)
-	if forward_speed < -0.1:
-		engine_rpm = -engine_rpm
-	fuel_cut = engine_rpm >= redline_rpm
-	_shift_cooldown -= delta
-	if not _reversing and _shift_cooldown <= 0.0:
-		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm:
-			current_gear += 1
-			_shift_cooldown = 0.4
-		elif current_gear > 1 and engine_rpm < shift_down_rpm:
-			current_gear -= 1
-			_shift_cooldown = 0.4
 
 	# Reset on demand (press edge) plus automatic recovery when inverted
 	# and slow. The edge fires once per press so holding the key parks

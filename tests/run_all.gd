@@ -37,6 +37,7 @@ func _run_all() -> void:
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
 		"test_coast_upshifts_without_throttle",
+		"test_drive_force_uses_current_tick_rpm",
 		"test_redline_fuel_cut",
 		"test_over_rev_cap",
 		"test_brake_20ms_within_30m",
@@ -231,6 +232,29 @@ func test_coast_upshifts_without_throttle() -> bool:
 	check(car.input_throttle == 0.0, "coasting applies zero throttle")
 	check(car.current_gear >= 2, "coasting at redline upshifts without throttle (gear %d)" % car.current_gear)
 	check(car.engine_rpm <= car.shift_up_rpm, "coasting upshift drops rpm to the taller ratio (%.0f)" % car.engine_rpm)
+	await _despawn_car()
+	return true
+
+func test_drive_force_uses_current_tick_rpm() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 0.0
+	car.input_steer = 0.0
+	for i in 60:
+		await physics_frame
+	check(absf(car.engine_rpm - 800.0) < 200.0, "idle settles near 800 rpm (%.0f)" % car.engine_rpm)
+	car.input_throttle = 0.3
+	car.linear_velocity = Vector3(0, 0, -11.0)
+	car.angular_velocity = Vector3.ZERO
+	var fwd_before := -car.global_transform.basis.z
+	var speed_before := car.linear_velocity.dot(fwd_before)
+	await physics_frame
+	var fwd_after := -car.global_transform.basis.z
+	var speed_after := car.linear_velocity.dot(fwd_after)
+	var gain := speed_after - speed_before
+	check(car.engine_rpm >= 3500.0 and car.engine_rpm <= 4500.0, "rpm is this tick's readout (~3970, got %.0f)" % car.engine_rpm)
+	check(gain > 0.033, "single-tick gain reflects fresh torque (gain %.4f)" % gain)
 	await _despawn_car()
 	return true
 
