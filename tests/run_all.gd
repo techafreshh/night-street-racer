@@ -75,6 +75,8 @@ func _run_all() -> void:
 		"test_wrong_way_detected",
 		"countdown_sequence_3s",
 		"lap_counting_increments",
+		"positions_sort_by_progress",
+		"results_hold_all_finishers",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1748,4 +1750,101 @@ func lap_counting_increments() -> bool:
 	mgr.queue_free()
 	await process_frame
 	await physics_frame
+	return true
+
+func positions_sort_by_progress() -> bool:
+	var sprint := load("res://assets/events/harbor_sprint.tres") as RaceEvent
+	check(sprint != null, "harbor_sprint loads for the positions check")
+	if sprint == null:
+		return true
+	var circuit := load("res://assets/events/downtown_gp.tres") as RaceEvent
+	check(circuit != null, "downtown_gp loads for the positions check")
+	if circuit == null:
+		return true
+	var total_s := sprint.checkpoints.size()
+	var total_c := circuit.checkpoints.size()
+	check(total_s >= 4, "sprint has >= 4 gates (got %d)" % total_s)
+	check(total_c >= 4, "circuit has >= 4 gates (got %d)" % total_c)
+	var lap_top := RacePositions.progress(0, total_c - 1, 0.9, total_c)
+	var lap_next := RacePositions.progress(1, 0, 0.0, total_c)
+	check(lap_next > lap_top, "lap beats idx (%.2f > %.2f)" % [lap_next, lap_top])
+	var near := RacePositions.progress(0, 1, 0.9, total_c)
+	var ahead := RacePositions.progress(0, 2, 0.0, total_c)
+	check(ahead > near, "idx beats frac (%.2f > %.2f)" % [ahead, near])
+	check(RacePositions.progress(0, 1, -0.5, total_c) == RacePositions.progress(0, 1, 0.0, total_c), "frac clamps low")
+	check(RacePositions.progress(0, 1, 2.0, total_c) == RacePositions.progress(0, 1, 1.0, total_c), "frac clamps high")
+	check(RacePositions.progress(0, -1, 0.5, total_c) < RacePositions.progress(0, 0, 0.0, total_c), "start sentinel stays below gate 0")
+	var prev := Vector3(0, 1, 0)
+	var nxt := Vector3(10, 1, 0)
+	check(absf(RacePositions.fraction_to_next(Vector3(5, 1, 0), prev, nxt) - 0.5) < 0.001, "mid-segment projects to 0.5")
+	check(absf(RacePositions.fraction_to_next(prev, prev, nxt) - 0.0) < 0.001, "segment start projects to 0.0")
+	check(absf(RacePositions.fraction_to_next(Vector3(20, 5, 3), prev, nxt) - 1.0) < 0.001, "past-segment clamps to 1.0")
+	check(RacePositions.fraction_to_next(Vector3(5, 99, -3), prev, prev) == 0.0, "degenerate segment yields 0.0")
+	var sprint_mid := RacePositions.progress(0, total_s - 2, 1.0, total_s)
+	var sprint_done := RacePositions.progress(0, total_s - 1, 1.0, total_s)
+	check(sprint_done > sprint_mid, "sprint finish outranks mid-race (%.2f > %.2f)" % [sprint_done, sprint_mid])
+	var entries: Array = [
+		{"id": "leader", "progress": RacePositions.progress(1, 0, 0.2, total_c)},
+		{"id": "mid", "progress": RacePositions.progress(0, 3, 0.9, total_c)},
+		{"id": "back", "progress": RacePositions.progress(0, -1, 0.0, total_c)},
+	]
+	var order := RacePositions.standings_for(entries)
+	check(order.size() == 3, "standings hold 3 racers (got %d)" % order.size())
+	if order.size() == 3:
+		check(str((order[0] as Dictionary)["id"]) == "leader", "leader tops standings")
+		check(str((order[1] as Dictionary)["id"]) == "mid", "mid holds second")
+		check(str((order[2] as Dictionary)["id"]) == "back", "start sentinel sinks to last")
+	check(str((entries[0] as Dictionary)["id"]) == "leader", "standings input keeps order")
+	check(str((entries[2] as Dictionary)["id"]) == "back", "standings input not mutated")
+	var tie: Array = [{"id": "a", "progress": 5.0}, {"id": "b", "progress": 5.0}, {"id": "c", "progress": 6.0}]
+	var tied := RacePositions.standings_for(tie)
+	check(str((tied[0] as Dictionary)["id"]) == "c", "higher progress wins the tie group")
+	check(str((tied[1] as Dictionary)["id"]) == "a", "tie keeps first-recorded order")
+	check(str((tied[2] as Dictionary)["id"]) == "b", "tie sinks the later entry")
+	var messy: Array = [{"id": "good", "progress": 10.0}, {"id": "broken"}]
+	var ranked := RacePositions.standings_for(messy)
+	check(str((ranked[0] as Dictionary)["id"]) == "good", "scored entry outranks malformed one")
+	check(str((ranked[1] as Dictionary)["id"]) == "broken", "malformed entry sinks without crashing")
+	return true
+
+func results_hold_all_finishers() -> bool:
+	var table := RacePositions.new()
+	check(table != null, "RacePositions instantiates standalone")
+	if table == null:
+		return true
+	table.record_finish("ai_2", 95.5)
+	table.record_finish("player", 88.2)
+	table.record_finish("ai_1", 91.0)
+	table.record_finish("ai_3", 102.7)
+	check(table.size() == 4, "results hold 4 finishers (got %d)" % table.size())
+	var ordered := table.ordered_results()
+	check(ordered.size() == 4, "ordered results hold 4 rows (got %d)" % ordered.size())
+	if ordered.size() == 4:
+		check(str((ordered[0] as Dictionary)["racer"]) == "player", "fastest finisher is player")
+		check(str((ordered[1] as Dictionary)["racer"]) == "ai_1", "second finisher is ai_1")
+		check(str((ordered[2] as Dictionary)["racer"]) == "ai_2", "third finisher is ai_2")
+		check(str((ordered[3] as Dictionary)["racer"]) == "ai_3", "slowest finisher is ai_3")
+		check(int((ordered[0] as Dictionary)["place"]) == 1, "winner takes place 1")
+		check(int((ordered[1] as Dictionary)["place"]) == 2, "runner-up takes place 2")
+		check(int((ordered[2] as Dictionary)["place"]) == 3, "third takes place 3")
+		check(int((ordered[3] as Dictionary)["place"]) == 4, "last takes place 4")
+		check(absf(float((ordered[0] as Dictionary)["time_s"]) - 88.2) < 0.001, "winner time kept (%.2f)" % float((ordered[0] as Dictionary)["time_s"]))
+	check(table.place_of("player") == 1, "place_of matches the winner")
+	check(table.place_of("ai_1") == 2, "place_of matches second")
+	check(table.place_of("ai_2") == 3, "place_of matches third")
+	check(table.place_of("ai_3") == 4, "place_of matches last")
+	var dup := table.record_finish("player", 70.0)
+	check(dup == 1, "duplicate keeps the existing place (got %d)" % dup)
+	check(table.size() == 4, "duplicate never adds a row")
+	check(absf(float(((table.ordered_results()[0]) as Dictionary)["time_s"]) - 88.2) < 0.001, "duplicate keeps the first time")
+	var bad := table.record_finish("ghost", -5.0)
+	check(bad == 0, "negative time is ignored (got %d)" % bad)
+	check(table.size() == 4, "negative time never adds a row")
+	check(table.place_of("ghost") == 0, "ignored racer has no place")
+	table.record_finish("", 50.0)
+	check(table.size() == 4, "empty id never adds a row")
+	table.clear()
+	check(table.size() == 0, "clear empties the table")
+	check(table.ordered_results().is_empty(), "ordered results empty after clear")
+	check(table.place_of("player") == 0, "no place survives clear")
 	return true
