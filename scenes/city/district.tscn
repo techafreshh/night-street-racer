@@ -348,11 +348,11 @@ collision_layer = 1
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Road_EW_0"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 shape = SubResource("BoxShape3D_road_ew")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Road_EW_0"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 mesh = SubResource("BoxMesh_road_ew")
 
 [node name="Road_EW_1" type="StaticBody3D" parent="."]
@@ -361,11 +361,11 @@ collision_layer = 1
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Road_EW_1"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 shape = SubResource("BoxShape3D_road_ew")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Road_EW_1"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 mesh = SubResource("BoxMesh_road_ew")
 
 [node name="Road_EW_2" type="StaticBody3D" parent="."]
@@ -374,11 +374,11 @@ collision_layer = 1
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Road_EW_2"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 shape = SubResource("BoxShape3D_road_ew")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Road_EW_2"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 mesh = SubResource("BoxMesh_road_ew")
 
 [node name="Road_EW_3" type="StaticBody3D" parent="."]
@@ -387,11 +387,11 @@ collision_layer = 1
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Road_EW_3"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 shape = SubResource("BoxShape3D_road_ew")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Road_EW_3"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 mesh = SubResource("BoxMesh_road_ew")
 
 [node name="Road_EW_4" type="StaticBody3D" parent="."]
@@ -400,11 +400,11 @@ collision_layer = 1
 collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="Road_EW_4"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 shape = SubResource("BoxShape3D_road_ew")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="Road_EW_4"]
-position = Vector3(0, -0.1, 0)
+position = Vector3(0, -0.08, 0)
 mesh = SubResource("BoxMesh_road_ew")
 
 [node name="WallN" type="StaticBody3D" parent="."]
