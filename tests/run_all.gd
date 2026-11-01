@@ -42,6 +42,8 @@ func _run_all() -> void:
 		"test_steer_turns_at_speed",
 		"test_test_ground_loads",
 		"test_player_input_bridge",
+		"test_export_presets_present",
+		"test_export_presets_targets",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -396,4 +398,37 @@ func test_steer_turns_at_speed() -> bool:
 	check(absf(total) > deg_to_rad(20.0), "full steer turns heading > 20 deg in 2 s (%.1f deg)" % rad_to_deg(total))
 	check(up.y > 0.5, "car stays upright while turning (up.y %.3f)" % up.y)
 	await _despawn_car()
+	return true
+
+func test_export_presets_present() -> bool:
+	var cfg := ConfigFile.new()
+	check(cfg.load("res://export_presets.cfg") == OK, "export_presets.cfg parses in the engine ConfigFile")
+	var pairs: Array[String] = []
+	for s: String in cfg.get_sections():
+		if s.begins_with("preset.") and s.get_slice_count(".") == 2:
+			pairs.append("%s|%s" % [str(cfg.get_value(s, "name", "")), str(cfg.get_value(s, "platform", ""))])
+	check(pairs.has("Windows Desktop|Windows Desktop"), "Windows Desktop preset on platform Windows Desktop exists")
+	check(pairs.has("Linux|Linux"), "Linux preset on platform Linux exists")
+	return true
+
+func test_export_presets_targets() -> bool:
+	var cfg := ConfigFile.new()
+	check(cfg.load("res://export_presets.cfg") == OK, "export_presets.cfg loads for target checks")
+	var wanted := {"Windows Desktop": ".exe", "Linux": ".x86_64"}
+	var seen: Array[String] = []
+	for s: String in cfg.get_sections():
+		if not (s.begins_with("preset.") and s.get_slice_count(".") == 2):
+			continue
+		var preset_name := str(cfg.get_value(s, "name", ""))
+		if not wanted.has(preset_name):
+			continue
+		seen.append(preset_name)
+		var path := str(cfg.get_value(s, "export_path", ""))
+		check(path.begins_with("build/"), "%s exports under build/ (got %s)" % [preset_name, path])
+		check(path.ends_with(str(wanted[preset_name])), "%s export path ends with %s (got %s)" % [preset_name, str(wanted[preset_name]), path])
+		check(str(cfg.get_value(s + ".options", "binary_format/architecture", "")) == "x86_64", "%s targets x86_64" % preset_name)
+		check(cfg.get_value(s, "encrypt_pck", true) == false, "%s leaves pck unencrypted" % preset_name)
+		check(cfg.get_value(s, "dedicated_server", true) == false, "%s is not a dedicated-server preset" % preset_name)
+	check(seen.has("Windows Desktop"), "Windows Desktop preset present for target checks")
+	check(seen.has("Linux"), "Linux preset present for target checks")
 	return true
