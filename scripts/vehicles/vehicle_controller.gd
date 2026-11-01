@@ -7,7 +7,8 @@ extends RigidBody3D
 ## lateral force with a friction-circle cap) are applied with
 ## apply_force at the wheel/contact offset so weight transfer and yaw
 ## emerge from the solver. Engine torque curve plus a 5-speed automatic
-## gearbox feeds a FWD/RWD/AWD axle split; the handbrake cuts the rear
+## gearbox feeds a FWD/RWD/AWD axle split; a redline fuel-cut zeroes
+## torque at redline_rpm with an over-rev cap at max_engine_rpm; the handbrake cuts the rear
 ## lateral cap and locks the rears. Flip recovery teleports safely via
 ## _integrate_forces. Driven at fixed 60 Hz physics.
 ## Input seam: with use_player_input the controller samples InputMap
@@ -39,6 +40,10 @@ enum DriveMode { FWD, RWD, AWD }
 @export var final_drive := 3.9
 @export var shift_up_rpm := 5500.0
 @export var shift_down_rpm := 2500.0
+## Fuel-cut onset: torque tapers to zero at this rpm (hard cut at/above).
+@export var redline_rpm := 6800.0
+## Absolute cap on the engine_rpm readout (gearbox over-rev cap).
+@export var max_engine_rpm := 7200.0
 @export var drive_mode: DriveMode = DriveMode.RWD
 ## Steering and brakes.
 @export var max_steer_angle := 0.55
@@ -68,6 +73,8 @@ var input_reset := false
 var speed_ms := 0.0
 var current_gear := 1
 var engine_rpm := 800.0
+## True while engine_rpm >= redline_rpm; hook for future audio/fuel limits.
+var fuel_cut := false
 var is_grounded := false
 
 var _throttle := 0.0
@@ -227,10 +234,16 @@ func _sample_inputs() -> void:
 
 
 func _sample_torque(rpm: float) -> float:
+	# Redline fuel-cut (AI/audio contract): torque tapers from the
+	# (6500, 0.6) point down to (redline_rpm, 0.0) and stays exactly 0.0
+	# at or above redline, so drive force (_throttle * torque * ...) is
+	# zero while fuel_cut holds. Entries below 6500 rpm are unchanged.
+	if rpm >= redline_rpm:
+		return 0.0
 	var pts: Array[Vector2] = [
 		Vector2(800.0, 0.55), Vector2(1500.0, 0.75), Vector2(3000.0, 1.0),
 		Vector2(4500.0, 1.0), Vector2(5500.0, 0.85), Vector2(6500.0, 0.6),
-		Vector2(7200.0, 0.4),
+		Vector2(redline_rpm, 0.0),
 	]
 	if rpm <= pts[0].x:
 		return engine_max_torque * pts[0].y
@@ -316,6 +329,7 @@ func _physics_process(delta: float) -> void:
 		_reversing = false
 
 	# Engine force from the torque curve at the current rpm and gear.
+	# Zero while fuel_cut holds because _sample_torque returns 0 at/above redline.
 	var gear_ratio: float = gear_ratios[clampi(current_gear - 1, 0, gear_ratios.size() - 1)]
 	var engine_force_total := _throttle * _sample_torque(engine_rpm) * gear_ratio * final_drive / wheel_radius
 	var driven_count := _driven_wheel_count()
@@ -400,10 +414,12 @@ func _physics_process(delta: float) -> void:
 		apply_central_force(-fwd * signf(forward_speed) * rolling_resistance)
 
 	# Automatic gearbox with shift hysteresis from vehicle speed.
+	# Gearbox over-rev cap: clamp the readout before the shift block reads it.
 	var wheel_rps := absf(forward_speed) / (TAU * wheel_radius)
-	engine_rpm = maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0)
+	engine_rpm = clampf(maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0), 800.0, max_engine_rpm)
 	if forward_speed < -0.1:
 		engine_rpm = -engine_rpm
+	fuel_cut = engine_rpm >= redline_rpm
 	_shift_cooldown -= delta
 	if not _reversing and _shift_cooldown <= 0.0:
 		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm:
@@ -453,6 +469,7 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	state.angular_velocity = Vector3.ZERO
 	current_gear = 1
 	engine_rpm = 800.0
+	fuel_cut = false
 	_reversing = false
 	_inverted_time = 0.0
 	_current_steer = 0.0

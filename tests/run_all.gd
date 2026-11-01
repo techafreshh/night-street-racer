@@ -37,6 +37,8 @@ func _run_all() -> void:
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
 		"test_coast_upshifts_without_throttle",
+		"test_redline_fuel_cut",
+		"test_over_rev_cap",
 		"test_brake_20ms_within_30m",
 		"test_handbrake_reduces_rear_grip",
 		"test_assists_reduce_slip_when_on",
@@ -229,6 +231,50 @@ func test_coast_upshifts_without_throttle() -> bool:
 	check(car.input_throttle == 0.0, "coasting applies zero throttle")
 	check(car.current_gear >= 2, "coasting at redline upshifts without throttle (gear %d)" % car.current_gear)
 	check(car.engine_rpm <= car.shift_up_rpm, "coasting upshift drops rpm to the taller ratio (%.0f)" % car.engine_rpm)
+	await _despawn_car()
+	return true
+
+func test_redline_fuel_cut() -> bool:
+	var packed = load("res://scenes/vehicles/vehicle_base.tscn") as PackedScene
+	check(packed != null, "vehicle scene loads for redline fuel-cut check")
+	if packed == null:
+		return true
+	var inst := packed.instantiate() as VehicleController
+	check(inst != null, "vehicle instantiates for redline fuel-cut check")
+	if inst == null:
+		return true
+	var full: float = inst.engine_max_torque
+	var t3000 := inst._sample_torque(3000.0)
+	check(absf(t3000 - full) < 0.001, "torque at 3000 rpm is full (%.2f vs %.2f)" % [t3000, full])
+	var t6500 := inst._sample_torque(6500.0)
+	check(absf(t6500 - 0.6 * full) < 0.001, "torque at 6500 rpm is 0.6x (%.2f)" % t6500)
+	var tnear := inst._sample_torque(inst.redline_rpm - 100.0)
+	check(tnear > 0.0, "torque just below redline stays positive (%.2f)" % tnear)
+	check(tnear < t6500, "torque tapers below the 6500 value near redline (%.2f vs %.2f)" % [tnear, t6500])
+	check(inst._sample_torque(inst.redline_rpm) == 0.0, "torque is exactly 0.0 at redline")
+	check(inst._sample_torque(8000.0) == 0.0, "torque stays 0.0 above redline")
+	inst.free()
+	return true
+
+func test_over_rev_cap() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 0.0
+	car.input_steer = 0.0
+	car.current_gear = 1
+	car.linear_velocity = Vector3(0, 0, -25)
+	var peak := 0.0
+	var saw_cut := false
+	for i in 30:
+		await physics_frame
+		peak = maxf(peak, car.engine_rpm)
+		if car.fuel_cut:
+			saw_cut = true
+	check(peak <= car.max_engine_rpm, "over-rev transient never exceeds the cap (peak %.0f vs cap %.0f)" % [peak, car.max_engine_rpm])
+	check(saw_cut, "fuel_cut raises while over redline")
+	check(car.current_gear >= 2, "over-rev still upshifts via the coast path (gear %d)" % car.current_gear)
+	check(car.engine_rpm <= car.shift_up_rpm, "upshift drops rpm to the taller ratio (%.0f)" % car.engine_rpm)
 	await _despawn_car()
 	return true
 
