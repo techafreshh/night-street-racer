@@ -40,6 +40,8 @@ func _run_all() -> void:
 		"test_drive_force_uses_current_tick_rpm",
 		"test_redline_fuel_cut",
 		"test_over_rev_cap",
+		"test_limiter_order_repairs_inversion",
+		"test_limiter_defaults_ordered",
 		"test_brake_20ms_within_30m",
 		"test_handbrake_reduces_rear_grip",
 		"test_assists_reduce_slip_when_on",
@@ -300,6 +302,52 @@ func test_over_rev_cap() -> bool:
 	check(car.current_gear >= 2, "over-rev still upshifts via the coast path (gear %d)" % car.current_gear)
 	check(car.engine_rpm <= car.shift_up_rpm, "upshift drops rpm to the taller ratio (%.0f)" % car.engine_rpm)
 	await _despawn_car()
+	return true
+
+func test_limiter_order_repairs_inversion() -> bool:
+	var inverted := VehicleController.resolve_limiter_order(7000.0, 6800.0, 6000.0)
+	check(inverted[2] == 6000.0, "repair keeps the absolute cap authoritative (%.0f)" % inverted[2])
+	check(inverted[1] == 6000.0, "repair clamps redline to the cap (%.0f)" % inverted[1])
+	check(inverted[0] == 6000.0, "repair clamps shift_up to the repaired redline (%.0f)" % inverted[0])
+	var ordered := VehicleController.resolve_limiter_order(5500.0, 6800.0, 7200.0)
+	check(ordered[0] == 5500.0 and ordered[1] == 6800.0 and ordered[2] == 7200.0, "repair is a no-op for ordered values")
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 0.0
+	car.input_steer = 0.0
+	car.max_engine_rpm = 6000.0
+	car.redline_rpm = 6800.0
+	car.shift_up_rpm = 7000.0
+	car.current_gear = 1
+	car.linear_velocity = Vector3(0, 0, -25)
+	var peak := 0.0
+	var saw_cut := false
+	for i in 30:
+		await physics_frame
+		peak = maxf(peak, car.engine_rpm)
+		if car.fuel_cut:
+			saw_cut = true
+	check(car.shift_up_rpm <= car.redline_rpm, "inversion self-repairs shift_up <= redline (%.0f <= %.0f)" % [car.shift_up_rpm, car.redline_rpm])
+	check(car.redline_rpm <= car.max_engine_rpm, "inversion self-repairs redline <= cap (%.0f <= %.0f)" % [car.redline_rpm, car.max_engine_rpm])
+	check(peak <= car.max_engine_rpm, "repaired readout never exceeds the cap (peak %.0f vs cap %.0f)" % [peak, car.max_engine_rpm])
+	check(saw_cut, "fuel_cut stays reachable after repair")
+	check(car._sample_torque(car.redline_rpm) == 0.0, "torque zeroes at the repaired redline")
+	await _despawn_car()
+	return true
+
+func test_limiter_defaults_ordered() -> bool:
+	var packed = load("res://scenes/vehicles/vehicle_base.tscn") as PackedScene
+	check(packed != null, "vehicle scene loads for limiter default check")
+	if packed == null:
+		return true
+	var inst := packed.instantiate() as VehicleController
+	check(inst != null, "vehicle instantiates for limiter default check")
+	if inst == null:
+		return true
+	check(inst.shift_up_rpm <= inst.redline_rpm, "default shift_up <= redline (%.0f <= %.0f)" % [inst.shift_up_rpm, inst.redline_rpm])
+	check(inst.redline_rpm <= inst.max_engine_rpm, "default redline <= cap (%.0f <= %.0f)" % [inst.redline_rpm, inst.max_engine_rpm])
+	inst.free()
 	return true
 
 func test_brake_20ms_within_30m() -> bool:

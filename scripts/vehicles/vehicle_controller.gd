@@ -41,8 +41,12 @@ enum DriveMode { FWD, RWD, AWD }
 @export var shift_up_rpm := 5500.0
 @export var shift_down_rpm := 2500.0
 ## Fuel-cut onset: torque tapers to zero at this rpm (hard cut at/above).
+## Invariant: shift_up_rpm <= redline_rpm <= max_engine_rpm; the absolute
+## cap wins (cap-down repair in resolve_limiter_order()).
 @export var redline_rpm := 6800.0
 ## Absolute cap on the engine_rpm readout (gearbox over-rev cap).
+## Invariant: shift_up_rpm <= redline_rpm <= max_engine_rpm; this cap is
+## authoritative and never moves during repair.
 @export var max_engine_rpm := 7200.0
 @export var drive_mode: DriveMode = DriveMode.RWD
 ## Steering and brakes.
@@ -103,6 +107,10 @@ var _wheels: Array[Dictionary] = []
 
 func _ready() -> void:
 	apply_tune()
+	var repaired := resolve_limiter_order(shift_up_rpm, redline_rpm, max_engine_rpm)
+	shift_up_rpm = repaired[0]
+	redline_rpm = repaired[1]
+	max_engine_rpm = repaired[2]
 	for wheel_name in ["WheelFL", "WheelFR", "WheelRL", "WheelRR"]:
 		var ray := get_node_or_null(wheel_name) as RayCast3D
 		if ray == null:
@@ -158,6 +166,18 @@ static func clamp_to_friction_circle(fx: float, fy: float, max_force: float, lat
 	var lat_cap := capped * clampf(lateral_grip_factor, 0.0, 1.0)
 	var room := maxf(lat_cap * lat_cap - minf(cx * cx, lat_cap * lat_cap), 0.0)
 	return Vector2(cx, clampf(fy, -sqrt(room), sqrt(room)))
+
+
+## Limiter ordering guard (per-car-personality contract): repairs
+## shift_up/redline/max triples to shift_up <= redline <= max with the
+## absolute cap authoritative, so the engine_rpm readout can always climb
+## to redline and fuel_cut stays reachable while _sample_torque() (which
+## reads the same repaired redline_rpm) agrees with the flag by
+## construction. Pure-static so headless tests call it with no scene.
+static func resolve_limiter_order(shift_up: float, redline: float, max_rpm: float) -> Array:
+	var fixed_redline := minf(redline, max_rpm)
+	var fixed_shift := minf(shift_up, fixed_redline)
+	return [fixed_shift, fixed_redline, max_rpm]
 
 
 ## Deterministic reset candidates: base first, then 8 compass points at
@@ -335,6 +355,10 @@ func _physics_process(delta: float) -> void:
 	# within one frame. Pre-shift ratio is kept for both rpm and force on
 	# shift frames (the shift takes effect next tick).
 	# Gearbox over-rev cap: clamp the readout before the shift block reads it.
+	var repaired_limiter := resolve_limiter_order(shift_up_rpm, redline_rpm, max_engine_rpm)
+	shift_up_rpm = repaired_limiter[0]
+	redline_rpm = repaired_limiter[1]
+	max_engine_rpm = repaired_limiter[2]
 	var gear_ratio: float = gear_ratios[clampi(current_gear - 1, 0, gear_ratios.size() - 1)]
 	var wheel_rps := absf(forward_speed) / (TAU * wheel_radius)
 	engine_rpm = clampf(maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0), 800.0, max_engine_rpm)
