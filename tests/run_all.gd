@@ -55,6 +55,7 @@ func _run_all() -> void:
 		"test_field_driven_ignores_reset_key",
 		"test_steer_turns_at_speed",
 		"test_test_ground_loads",
+		"test_district_loads",
 		"test_player_input_bridge",
 		"test_export_presets_present",
 		"test_export_presets_targets",
@@ -700,6 +701,87 @@ func test_test_ground_loads() -> bool:
 	check(walls >= 4, "test ground has >= 4 barrier walls (%d)" % walls)
 	check(walled_shapes >= 4, "walls are invisible (mesh-less) with collision (%d)" % walled_shapes)
 	check(lights >= 1, "test ground has a DirectionalLight3D")
+	instance.free()
+	return true
+
+func test_district_loads() -> bool:
+	var packed = load("res://scenes/city/district.tscn")
+	check(packed is PackedScene, "district.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "district instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "District", "district root node is District")
+	var block_packed = load("res://scenes/city/block.tscn")
+	check(block_packed is PackedScene, "block.tscn loads as PackedScene")
+	var block_inst: Node = null
+	if block_packed is PackedScene:
+		block_inst = (block_packed as PackedScene).instantiate()
+		check(block_inst != null, "block prefab instantiates")
+		if block_inst != null:
+			check(block_inst.name == "Block", "block prefab root node is Block")
+	var statics := instance.find_children("*", "StaticBody3D", true, false)
+	var blocks := 0
+	var roads := 0
+	var walls := 0
+	var walled_shapes := 0
+	var layers_ok := true
+	var block_dims_ok := true
+	var road_dims_ok := true
+	for body in statics:
+		var rigid := body as StaticBody3D
+		if rigid == null:
+			continue
+		if rigid.collision_layer != 1:
+			layers_ok = false
+		var bname := str(rigid.name)
+		if bname.begins_with("Block_"):
+			blocks += 1
+			var measured := false
+			for child in rigid.get_children():
+				if child is CollisionShape3D:
+					var box := (child as CollisionShape3D).shape as BoxShape3D
+					if box != null and absf(box.size.x - 60.0) < 0.001 and absf(box.size.z - 60.0) < 0.001:
+						measured = true
+			if not measured:
+				block_dims_ok = false
+		elif bname.begins_with("Road_"):
+			roads += 1
+			var road_measured := false
+			for child in rigid.get_children():
+				if child is CollisionShape3D:
+					var rbox := (child as CollisionShape3D).shape as BoxShape3D
+					if rbox != null and absf(minf(rbox.size.x, rbox.size.z) - 8.0) < 0.001:
+						road_measured = true
+			if not road_measured:
+				road_dims_ok = false
+		elif bname.begins_with("Wall"):
+			walls += 1
+			var has_shape := false
+			var has_mesh := false
+			for grandchild in rigid.get_children():
+				if grandchild is CollisionShape3D:
+					has_shape = true
+				if grandchild is MeshInstance3D:
+					has_mesh = true
+			if has_shape and not has_mesh:
+				walled_shapes += 1
+	check(statics.size() >= 16, "district has >= 16 StaticBody3D colliders (%d)" % statics.size())
+	check(blocks >= 16, "district has >= 16 block colliders (%d)" % blocks)
+	check(roads >= 10, "district has >= 10 road strips (%d)" % roads)
+	check(walls >= 4, "district has >= 4 edge walls (%d)" % walls)
+	check(walled_shapes >= 4, "edge walls are invisible (mesh-less) with collision (%d)" % walled_shapes)
+	check(layers_ok, "every district StaticBody3D uses collision_layer 1")
+	check(block_dims_ok, "block collision shapes measure 60 m")
+	check(road_dims_ok, "road collision shapes measure 8 m wide")
+	var lights := instance.find_children("*", "DirectionalLight3D", true, false)
+	check(lights.size() >= 1, "district has a DirectionalLight3D")
+	var spawn := instance.get_node_or_null("SpawnPoint")
+	check(spawn != null and spawn is Marker3D, "district has a SpawnPoint Marker3D")
+	if block_inst != null:
+		block_inst.free()
 	instance.free()
 	return true
 
