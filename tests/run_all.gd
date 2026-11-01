@@ -68,6 +68,7 @@ func _run_all() -> void:
 		"test_district_night_uses_kit",
 		"traffic_yields_when_blocked",
 		"traffic_loops_without_error",
+		"ai_completes_loop_without_offroad",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1237,6 +1238,62 @@ func traffic_yields_when_blocked() -> bool:
 	lane.queue_free()
 	await process_frame
 	await physics_frame
+	return true
+
+func ai_completes_loop_without_offroad() -> bool:
+	var line := load("res://assets/city/test_line.tres") as RacingLine
+	check(line != null, "test_line.tres loads as RacingLine")
+	if line == null:
+		return true
+	check(line.points.size() == 20, "test oval has 20 waypoints (got %d)" % line.points.size())
+	var speeds := line.target_speeds()
+	check(speeds.size() == 20, "baked speeds cover all waypoints (got %d)" % speeds.size())
+	var lo := 1e9
+	var hi := -1e9
+	for s in speeds:
+		lo = minf(lo, s)
+		hi = maxf(hi, s)
+	check(lo >= 8.0 and hi <= 28.0, "baked speeds within [8, 28] (lo %.2f hi %.2f)" % [lo, hi])
+	check(lo < hi, "corner minimum slower than straight maximum (%.2f < %.2f)" % [lo, hi])
+	_release_inputs()
+	if is_instance_valid(_car):
+		_car.queue_free()
+		_car = null
+		await process_frame
+		await physics_frame
+	var packed := load("res://scenes/vehicles/ai_car.tscn") as PackedScene
+	check(packed != null, "ai_car.tscn loads as PackedScene")
+	if packed == null:
+		return true
+	_car = packed.instantiate() as VehicleController
+	check(_car != null, "AI car instantiates as VehicleController")
+	if _car == null:
+		return true
+	check(_car.use_player_input == false, "AI car is field-driven")
+	var brain := _car.get_node_or_null("AIRacerInput")
+	check(brain != null, "AI car has an AIRacerInput child")
+	root.add_child(_car)
+	_car.global_transform = line.start_pose()
+	for i in 5:
+		await physics_frame
+	var max_dev := 0.0
+	var laps := 0
+	for i in 5400:
+		await physics_frame
+		if not is_instance_valid(_car):
+			break
+		max_dev = maxf(max_dev, line.distance_to_center(_car.global_position))
+		if brain != null and is_instance_valid(brain):
+			laps = int(brain.get("laps_completed"))
+			if laps >= 1:
+				break
+	check(laps >= 1, "AI completes one full loop (laps %d)" % laps)
+	check(max_dev <= 4.5, "AI stays on road, max deviation <= 4.5 m (%.2f)" % max_dev)
+	var up := Vector3.UP
+	if is_instance_valid(_car):
+		up = _car.global_transform.basis.y
+	check(up.y > 0.5, "AI car stays upright (up.y %.3f)" % up.y)
+	await _despawn_car()
 	return true
 
 func traffic_loops_without_error() -> bool:
