@@ -231,8 +231,14 @@ func _physics_process(delta: float) -> void:
 	var steer_target := assisted_steer * max_steer_angle / (1.0 + absf(forward_speed) * steer_speed_falloff)
 	_current_steer = move_toward(_current_steer, steer_target, 5.0 * delta)
 
-	# Minimal reverse latch: hold brake at a near-standstill in 1st to
-	# back up; any throttle unlatches back to forward drive.
+	# Reverse latch (AI contract — replicate this sequence, don't just set brake):
+	# 1. Release throttle and slow to near-standstill (forward_speed in
+	#    (-0.5, 0.8)) with current_gear == 1 via the auto downshift cascade.
+	# 2. Hold brake above 0.5 to latch _reversing; brake at speed only
+	#    decelerates and never reverses.
+	# 3. Keep holding brake to back up toward reverse_max_speed (brake
+	#    doubles as reverse throttle while latched).
+	# 4. Any throttle unlatches back to forward drive.
 	if _brake > 0.5 and forward_speed > -0.5 and forward_speed < 0.8 and current_gear == 1 and _throttle < 0.05:
 		_reversing = true
 	if _throttle > 0.05:
@@ -294,7 +300,7 @@ func _physics_process(delta: float) -> void:
 				fx += -signf(f_speed) * handbrake_force
 			else:
 				fx += -f_speed * handbrake_force * 2.0
-		elif _brake > 0.01:
+		elif _brake > 0.01 and not _reversing:
 			if absf(f_speed) > 0.5:
 				fx += -signf(f_speed) * _brake * brake_force
 			else:
