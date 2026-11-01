@@ -23,6 +23,9 @@ jobs:
       - name: Scene boot check
         run: godot --headless --path . scenes/ui/main_menu.tscn --quit-after 60
 
+      - name: Test ground boot check
+        run: godot --headless --path . scenes/city/test_ground.tscn --quit-after 60
+
       - name: Run GDScript tests
         timeout-minutes: 5
         run: godot --headless --path . --script res://tests/run_all.gd

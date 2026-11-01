@@ -40,6 +40,8 @@ func _run_all() -> void:
 		"test_suspension_settles_after_drop",
 		"test_reset_after_flip",
 		"test_steer_turns_at_speed",
+		"test_test_ground_loads",
+		"test_player_input_bridge",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -291,6 +293,85 @@ func test_reset_after_flip() -> bool:
 	check(up2.y > 0.9, "inverted car self-rights without input (up.y %.3f)" % up2.y)
 	check(car.linear_velocity.length() < 1.0, "auto reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
 	await _despawn_car()
+	return true
+
+func test_test_ground_loads() -> bool:
+	var packed = load("res://scenes/city/test_ground.tscn")
+	check(packed is PackedScene, "test_ground.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "test ground instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "TestGround", "root node is TestGround")
+	var car: VehicleController = null
+	for child in instance.get_children():
+		if child is VehicleController:
+			car = child
+	check(car != null, "test ground spawns one VehicleController")
+	if car != null:
+		check(car.use_player_input == false, "spawned car is field-driven (use_player_input == false)")
+		check(car.get_node_or_null("PlayerInput") != null, "spawned car has a PlayerInput bridge child")
+	var ground: StaticBody3D = instance.get_node_or_null("Ground") as StaticBody3D
+	check(ground != null, "test ground has a Ground StaticBody3D")
+	if ground != null:
+		var span := 0.0
+		for child in ground.get_children():
+			if child is CollisionShape3D:
+				var box := (child as CollisionShape3D).shape as BoxShape3D
+				if box != null:
+					span = maxf(span, minf(box.size.x, box.size.z))
+		check(span >= 400.0, "ground collision spans >= 400 m (%.1f)" % span)
+	var walls := 0
+	var walled_shapes := 0
+	var lights := 0
+	for child in instance.get_children():
+		if child is DirectionalLight3D:
+			lights += 1
+		if child is StaticBody3D and str(child.name).begins_with("Wall"):
+			walls += 1
+			var has_shape := false
+			var has_mesh := false
+			for grandchild in child.get_children():
+				if grandchild is CollisionShape3D:
+					has_shape = true
+				if grandchild is MeshInstance3D:
+					has_mesh = true
+			if has_shape and not has_mesh:
+				walled_shapes += 1
+	check(walls >= 4, "test ground has >= 4 barrier walls (%d)" % walls)
+	check(walled_shapes >= 4, "walls are invisible (mesh-less) with collision (%d)" % walled_shapes)
+	check(lights >= 1, "test ground has a DirectionalLight3D")
+	instance.free()
+	return true
+
+func test_player_input_bridge() -> bool:
+	var packed = load("res://scenes/city/test_ground.tscn") as PackedScene
+	check(packed != null, "test_ground.tscn loads for the bridge test")
+	if packed == null:
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await physics_frame
+	var car: VehicleController = null
+	for child in instance.get_children():
+		if child is VehicleController:
+			car = child
+	check(car != null, "bridge test finds the spawned VehicleController")
+	if car == null:
+		instance.queue_free()
+		await process_frame
+		return true
+	Input.action_press("accelerate")
+	for i in 30:
+		await physics_frame
+	check(car.input_throttle > 0.5, "bridge copies accelerate into input_throttle (%.2f)" % car.input_throttle)
+	_release_inputs()
+	instance.queue_free()
+	await process_frame
+	await physics_frame
 	return true
 
 func test_steer_turns_at_speed() -> bool:
