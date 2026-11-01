@@ -41,6 +41,7 @@ func _run_all() -> void:
 		"test_assists_reduce_slip_when_on",
 		"test_suspension_settles_after_drop",
 		"test_reset_after_flip",
+		"test_field_driven_ignores_reset_key",
 		"test_steer_turns_at_speed",
 		"test_test_ground_loads",
 		"test_player_input_bridge",
@@ -341,6 +342,28 @@ func test_reset_after_flip() -> bool:
 	var up2: Vector3 = car.global_transform.basis.y
 	check(up2.y > 0.9, "inverted car self-rights without input (up.y %.3f)" % up2.y)
 	check(car.linear_velocity.length() < 1.0, "auto reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	await _despawn_car()
+	return true
+
+func test_field_driven_ignores_reset_key() -> bool:
+	var flip := Basis(Vector3(1, 0, 0), PI)
+	var car := await _spawn_car(Vector3(0, 0.7, 0), flip)
+	car.use_player_input = false
+	for i in 20:
+		await physics_frame
+	Input.action_press("reset_car")
+	for i in 20:
+		await physics_frame
+	var up: Vector3 = car.global_transform.basis.y
+	check(up.y < 0.3, "field-driven car ignores reset_car key (up.y %.3f)" % up.y)
+	Input.action_release("reset_car")
+	car.reset_vehicle()
+	for i in 60:
+		await physics_frame
+	var up2: Vector3 = car.global_transform.basis.y
+	check(up2.y > 0.9, "reset_vehicle() still uprights field-driven car (up.y %.3f)" % up2.y)
+	check(car.linear_velocity.length() < 1.0, "API reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	check(car.global_position.y > 0.3 and car.global_position.y < 2.0, "API reset parks at sane height (y %.2f)" % car.global_position.y)
 	await _despawn_car()
 	return true
 
