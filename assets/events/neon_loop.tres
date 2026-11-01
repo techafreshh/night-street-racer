@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/race/race_event.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+route_id = "neon_loop"
+event_type = 1
+laps = 2
+opponents = 4
+unlock_req = &"downtown_gp"
+reward = 1200
+checkpoints = PackedVector3Array(-136, 1, -136, 0, 1, -136, 136, 1, -136, 136, 1, 0, 136, 1, 136, 0, 1, 136, -136, 1, 136, -136, 1, 0)
+checkpoint_radius = 10.0

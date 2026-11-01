@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/race/race_event.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+route_id = "bayline_circuit"
+event_type = 1
+laps = 2
+opponents = 4
+unlock_req = &"neon_loop"
+reward = 1000
+checkpoints = PackedVector3Array(-136, 1, -68, -68, 1, -68, -68, 1, 0, -68, 1, 68, -136, 1, 68, -136, 1, 0)
+checkpoint_radius = 10.0
