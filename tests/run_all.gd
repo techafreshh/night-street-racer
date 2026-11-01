@@ -62,6 +62,7 @@ func _run_all() -> void:
 		"test_tune_values_in_range",
 		"test_cornering_g_envelope_0_8_to_1_4g",
 		"test_light_budget_max_8_omnis_per_mesh",
+		"test_central_roads_not_coplanar",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -918,6 +919,64 @@ func test_light_budget_max_8_omnis_per_mesh() -> bool:
 	check(worst <= 8, "worst mesh sees %d omnis (%s)" % [worst, worst_name])
 	root.remove_child(instance)
 	instance.free()
+	return true
+
+func test_central_roads_not_coplanar() -> bool:
+	var scenes: Array[String] = [
+		"res://scenes/city/district.tscn",
+		"res://scenes/city/district_night.tscn",
+	]
+	for scene_path in scenes:
+		var packed = load(scene_path)
+		check(packed is PackedScene, "%s loads as PackedScene" % scene_path)
+		if not (packed is PackedScene):
+			continue
+		var instance: Node = (packed as PackedScene).instantiate()
+		check(instance != null, "%s instantiates" % scene_path)
+		if instance == null:
+			continue
+		root.add_child(instance)
+		await process_frame
+		var ns_body := instance.get_node_or_null("Road_NS_2")
+		var ew_body := instance.get_node_or_null("Road_EW_2")
+		check(ns_body != null, "%s has Road_NS_2" % scene_path)
+		check(ew_body != null, "%s has Road_EW_2" % scene_path)
+		if ns_body == null or ew_body == null:
+			root.remove_child(instance)
+			instance.free()
+			continue
+		var ns_mesh := ns_body.get_node_or_null("MeshInstance3D") as MeshInstance3D
+		var ew_mesh := ew_body.get_node_or_null("MeshInstance3D") as MeshInstance3D
+		var ns_col := ns_body.get_node_or_null("CollisionShape3D") as CollisionShape3D
+		var ew_col := ew_body.get_node_or_null("CollisionShape3D") as CollisionShape3D
+		check(ns_mesh != null, "%s Road_NS_2 has a MeshInstance3D" % scene_path)
+		check(ew_mesh != null, "%s Road_EW_2 has a MeshInstance3D" % scene_path)
+		check(ns_col != null, "%s Road_NS_2 has a CollisionShape3D" % scene_path)
+		check(ew_col != null, "%s Road_EW_2 has a CollisionShape3D" % scene_path)
+		if ns_mesh == null or ew_mesh == null or ns_col == null or ew_col == null:
+			root.remove_child(instance)
+			instance.free()
+			continue
+		var ns_box := ns_mesh.mesh as BoxMesh
+		var ew_box := ew_mesh.mesh as BoxMesh
+		check(ns_box != null, "%s Road_NS_2 mesh is a BoxMesh" % scene_path)
+		check(ew_box != null, "%s Road_EW_2 mesh is a BoxMesh" % scene_path)
+		if ns_box == null or ew_box == null:
+			root.remove_child(instance)
+			instance.free()
+			continue
+		var ns_parent_y: float = (ns_body as Node3D).position.y
+		var ew_parent_y: float = (ew_body as Node3D).position.y
+		var ns_top: float = ns_parent_y + ns_mesh.position.y + ns_box.size.y * 0.5
+		var ew_top: float = ew_parent_y + ew_mesh.position.y + ew_box.size.y * 0.5
+		check(ns_top >= -0.01 and ns_top <= 0.05, "%s NS top at datum (%.3f)" % [scene_path, ns_top])
+		check(ew_top >= -0.01 and ew_top <= 0.05, "%s EW top near datum (%.3f)" % [scene_path, ew_top])
+		var lip: float = ew_top - ns_top
+		check(absf(lip - 0.02) <= 0.005, "%s EW lip +0.02 over NS (gap %.4f)" % [scene_path, lip])
+		check(absf(ns_col.position.y - ns_mesh.position.y) < 0.001, "%s NS collision matches mesh (%.4f vs %.4f)" % [scene_path, ns_col.position.y, ns_mesh.position.y])
+		check(absf(ew_col.position.y - ew_mesh.position.y) < 0.001, "%s EW collision matches mesh (%.4f vs %.4f)" % [scene_path, ew_col.position.y, ew_mesh.position.y])
+		root.remove_child(instance)
+		instance.free()
 	return true
 
 func test_steer_turns_at_speed() -> bool:
