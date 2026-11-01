@@ -24,9 +24,15 @@ enum DriveMode { FWD, RWD, AWD }
 @export var suspension_rest_length := 0.60
 ## Tires.
 @export var tire_grip := 1.0
+@export var tire_grip_front := 1.0
+@export var tire_grip_rear := 1.0
 @export var cornering_stiffness := 12000.0
 @export var surface_grip := 1.0
+@export var roll_stiffness_front := 8000.0
+@export var roll_stiffness_rear := 6500.0
+@export var downforce_coefficient := 1.2
 ## Engine and gearbox.
+@export var tune: CarTune
 @export var engine_max_torque := 380.0
 @export var gear_ratios: Array[float] = [3.2, 2.1, 1.5, 1.1, 0.85]
 @export var final_drive := 3.9
@@ -76,6 +82,7 @@ var _wheels: Array[Dictionary] = []
 
 
 func _ready() -> void:
+	apply_tune()
 	for wheel_name in ["WheelFL", "WheelFR", "WheelRL", "WheelRR"]:
 		var ray := get_node_or_null(wheel_name) as RayCast3D
 		if ray == null:
@@ -85,8 +92,27 @@ func _ready() -> void:
 			"node": ray,
 			"front": wheel_name == "WheelFL" or wheel_name == "WheelFR",
 			"rear": wheel_name == "WheelRL" or wheel_name == "WheelRR",
+			"left": wheel_name == "WheelFL" or wheel_name == "WheelRL",
 			"prev_comp": 0.0,
+			"comp": 0.0,
+			"contact_r": Vector3.ZERO,
+			"has_contact": false,
 		})
+
+
+func apply_tune() -> void:
+	if tune == null:
+		return
+	if not CarTune.validate(tune):
+		return
+	engine_max_torque = tune.engine_torque
+	gear_ratios = tune.gear_ratios.duplicate()
+	final_drive = tune.final_drive
+	tire_grip_front = tune.tire_grip_front
+	tire_grip_rear = tune.tire_grip_rear
+	roll_stiffness_front = tune.roll_stiffness_front
+	roll_stiffness_rear = tune.roll_stiffness_rear
+	downforce_coefficient = tune.downforce_coefficient
 
 
 func reset_vehicle() -> void:
@@ -160,6 +186,35 @@ func _is_driven(front: bool) -> bool:
 			return true
 
 
+func _apply_anti_roll(up: Vector3) -> void:
+	for is_front in [true, false]:
+		var stiffness := roll_stiffness_front if is_front else roll_stiffness_rear
+		var left_comp := 0.0
+		var right_comp := 0.0
+		var left_r := Vector3.ZERO
+		var right_r := Vector3.ZERO
+		var left_ok := false
+		var right_ok := false
+		for w in _wheels:
+			if bool(w["front"]) != is_front:
+				continue
+			if not bool(w.get("has_contact", false)):
+				continue
+			if bool(w.get("left", false)):
+				left_comp = float(w.get("comp", 0.0))
+				left_r = w.get("contact_r", Vector3.ZERO)
+				left_ok = true
+			else:
+				right_comp = float(w.get("comp", 0.0))
+				right_r = w.get("contact_r", Vector3.ZERO)
+				right_ok = true
+		if not (left_ok and right_ok):
+			continue
+		var transfer := stiffness * (left_comp - right_comp)
+		apply_force(up * transfer, left_r)
+		apply_force(up * -transfer, right_r)
+
+
 func _physics_process(delta: float) -> void:
 	_sample_inputs()
 	var basis_xform := global_transform.basis
@@ -206,11 +261,15 @@ func _physics_process(delta: float) -> void:
 		var prev_comp: float = w["prev_comp"]
 		var comp_vel := (comp - prev_comp) / maxf(delta, 0.0001)
 		w["prev_comp"] = comp
+		w["comp"] = comp
+		w["has_contact"] = has_contact
 		if not has_contact:
+			w["contact_r"] = Vector3.ZERO
 			continue
 		var susp := compute_suspension_force(comp, comp_vel, spring_rate, damper_bump, damper_rebound)
 
 		var r := contact - global_position
+		w["contact_r"] = r
 		var vel := linear_velocity + angular_velocity.cross(r)
 		var wheel_steer := _current_steer if front else 0.0
 		var w_fwd := fwd * cos(wheel_steer) + right * sin(wheel_steer)
@@ -240,11 +299,17 @@ func _physics_process(delta: float) -> void:
 				fx += -f_speed * _brake * brake_force * 2.0
 
 		var lat_factor := handbrake_grip_factor if (_handbrake and rear) else 1.0
-		var fy_raw := compute_lateral_force(slip, susp, tire_grip, cornering_stiffness, surface_grip, lat_factor) * ramp
+		var axle_grip := tire_grip_front if front else tire_grip_rear
+		var fy_raw := compute_lateral_force(slip, susp, axle_grip, cornering_stiffness, surface_grip, lat_factor) * ramp
 		var fy := VehicleAssists.damp_slip(fy_raw, assists_enabled)
-		var max_f := tire_grip * susp * surface_grip
+		var max_f := axle_grip * susp * surface_grip
 		var capped := clamp_to_friction_circle(fx, fy, max_f, lat_factor)
 		apply_force(up * susp + w_fwd * capped.x + w_right * capped.y, r)
+
+	_apply_anti_roll(up)
+	var planar_speed := Vector2(linear_velocity.x, linear_velocity.z).length()
+	if planar_speed > 0.01:
+		apply_central_force(-up * downforce_coefficient * planar_speed * planar_speed)
 
 	is_grounded = grounded > 0
 

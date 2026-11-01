@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/vehicles/car_tune.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+engine_torque = 350.0
+gear_ratios = Array[float]([3.2, 2.1, 1.5, 1.1, 0.85])
+final_drive = 3.7
+tire_grip_front = 1.05
+tire_grip_rear = 0.85
+roll_stiffness_front = 9000.0
+roll_stiffness_rear = 2500.0
+downforce_coefficient = 0.6

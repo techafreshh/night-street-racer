@@ -46,6 +46,8 @@ func _run_all() -> void:
 		"test_player_input_bridge",
 		"test_export_presets_present",
 		"test_export_presets_targets",
+		"test_tune_values_in_range",
+		"test_cornering_g_envelope_0_8_to_1_4g",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -476,4 +478,50 @@ func test_export_presets_targets() -> bool:
 		check(cfg.get_value(s, "dedicated_server", true) == false, "%s is not a dedicated-server preset" % preset_name)
 	check(seen.has("Windows Desktop"), "Windows Desktop preset present for target checks")
 	check(seen.has("Linux"), "Linux preset present for target checks")
+	return true
+
+func test_tune_values_in_range() -> bool:
+	var names: Array[String] = ["default_tune", "sport_tune", "drift_tune", "drag_tune"]
+	for n: String in names:
+		var tune := load("res://assets/cars/tunes/%s.tres" % n) as CarTune
+		check(tune != null, "%s loads as CarTune" % n)
+		if tune == null:
+			continue
+		check(CarTune.validate(tune), "%s passes CarTune.validate()" % n)
+		check(tune.engine_torque >= CarTune.ENGINE_TORQUE_MIN and tune.engine_torque <= CarTune.ENGINE_TORQUE_MAX, "%s torque in range (%.1f Nm)" % [n, tune.engine_torque])
+		check(tune.gear_ratios.size() >= CarTune.GEAR_COUNT_MIN and tune.gear_ratios.size() <= CarTune.GEAR_COUNT_MAX, "%s has 4-6 ratios (got %d)" % [n, tune.gear_ratios.size()])
+		for i in tune.gear_ratios.size():
+			var ratio: float = tune.gear_ratios[i]
+			check(ratio >= CarTune.GEAR_RATIO_MIN and ratio <= CarTune.GEAR_RATIO_MAX, "%s ratio %d in range (%.2f)" % [n, i, ratio])
+			if i > 0:
+				check(tune.gear_ratios[i - 1] > ratio, "%s ratios strictly decreasing at %d (%.2f > %.2f)" % [n, i, tune.gear_ratios[i - 1], ratio])
+		check(tune.final_drive >= CarTune.FINAL_DRIVE_MIN and tune.final_drive <= CarTune.FINAL_DRIVE_MAX, "%s final drive in range (%.2f)" % [n, tune.final_drive])
+		check(tune.tire_grip_front >= CarTune.TIRE_GRIP_MIN and tune.tire_grip_front <= CarTune.TIRE_GRIP_MAX, "%s front grip in range (%.2f)" % [n, tune.tire_grip_front])
+		check(tune.tire_grip_rear >= CarTune.TIRE_GRIP_MIN and tune.tire_grip_rear <= CarTune.TIRE_GRIP_MAX, "%s rear grip in range (%.2f)" % [n, tune.tire_grip_rear])
+		check(tune.roll_stiffness_front >= CarTune.ROLL_STIFFNESS_MIN and tune.roll_stiffness_front <= CarTune.ROLL_STIFFNESS_MAX, "%s front roll stiffness in range (%.0f)" % [n, tune.roll_stiffness_front])
+		check(tune.roll_stiffness_rear >= CarTune.ROLL_STIFFNESS_MIN and tune.roll_stiffness_rear <= CarTune.ROLL_STIFFNESS_MAX, "%s rear roll stiffness in range (%.0f)" % [n, tune.roll_stiffness_rear])
+		check(tune.downforce_coefficient >= CarTune.DOWNFORCE_MIN and tune.downforce_coefficient <= CarTune.DOWNFORCE_MAX, "%s downforce in range (%.2f)" % [n, tune.downforce_coefficient])
+	return true
+
+func test_cornering_g_envelope_0_8_to_1_4g() -> bool:
+	# Steady-state cornering g via the production friction-cap path: a large
+	# slip angle saturates compute_lateral_force so its return equals the cap
+	# (grip x load). Summed caps over 4 wheels divided by vehicle weight in g
+	# equals the mean axle grip, grounding the check in real tire math.
+	var tune := load("res://assets/cars/tunes/default_tune.tres") as CarTune
+	check(tune != null, "default tune loads for cornering envelope")
+	if tune == null:
+		return true
+	check(CarTune.validate(tune), "default tune validates for cornering envelope")
+	var wheel_load := 1200.0 * 9.81 / 4.0
+	var cap_front := absf(VehicleController.compute_lateral_force(1.0, wheel_load, tune.tire_grip_front, 12000.0, 1.0, 1.0))
+	var cap_rear := absf(VehicleController.compute_lateral_force(1.0, wheel_load, tune.tire_grip_rear, 12000.0, 1.0, 1.0))
+	var weight := 1200.0 * 9.81
+	var total := 2.0 * cap_front + 2.0 * cap_rear
+	var cornering_g := total / weight
+	var mean_grip := (tune.tire_grip_front + tune.tire_grip_rear) * 0.5
+	check(tune.tire_grip_front >= 0.8 and tune.tire_grip_front <= 1.4, "front axle grip in 0.8-1.4 g (%.2f)" % tune.tire_grip_front)
+	check(tune.tire_grip_rear >= 0.8 and tune.tire_grip_rear <= 1.4, "rear axle grip in 0.8-1.4 g (%.2f)" % tune.tire_grip_rear)
+	check(absf(cornering_g - mean_grip) < 0.05, "envelope matches mean grip (%.3f g vs %.3f)" % [cornering_g, mean_grip])
+	check(cornering_g >= 0.8 and cornering_g <= 1.4, "cornering g envelope 0.8-1.4 g (%.3f g)" % cornering_g)
 	return true
