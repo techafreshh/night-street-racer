@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="nightSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0b1026"/>
+      <stop offset="1" stop-color="#1b2a52"/>
+    </linearGradient>
+    <linearGradient id="roadFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3245"/>
+      <stop offset="1" stop-color="#12151f"/>
+    </linearGradient>
+    <linearGradient id="neonPink" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff2fb3"/>
+      <stop offset="1" stop-color="#ff7a3d"/>
+    </linearGradient>
+    <linearGradient id="neonCyan" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#22e6ff"/>
+      <stop offset="1" stop-color="#4d7cff"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="128" height="128" rx="24" fill="url(#nightSky)"/>
+  <rect x="6" y="6" width="116" height="116" rx="20" fill="none" stroke="#ff2fb3" stroke-width="3" opacity="0.85"/>
+  <circle cx="98" cy="26" r="9" fill="#f4f1de" opacity="0.9"/>
+  <circle cx="24" cy="22" r="1.6" fill="#ffffff" opacity="0.9"/>
+  <circle cx="44" cy="14" r="1.3" fill="#ffffff" opacity="0.8"/>
+  <circle cx="70" cy="20" r="1.5" fill="#ffffff" opacity="0.85"/>
+  <circle cx="112" cy="48" r="1.4" fill="#ffffff" opacity="0.8"/>
+  <circle cx="16" cy="46" r="1.4" fill="#ffffff" opacity="0.8"/>
+  <path d="M44 116 L64 52 L84 116 Z" fill="url(#roadFill)" stroke="url(#neonCyan)" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M44 116 L64 52 L84 116" fill="none" stroke="url(#neonPink)" stroke-width="2" opacity="0.0"/>
+  <path d="M64 84 L60 96 L64 108 L68 96 Z" fill="#ffd166"/>
+  <path d="M64 62 L61.5 70 L64 78 L66.5 70 Z" fill="#ffd166" opacity="0.9"/>
+  <path d="M64 46 L62.5 51 L64 56 L65.5 51 Z" fill="#ffd166" opacity="0.8"/>
+  <path d="M30 100 L48 64 L54 74 L36 110 Z" fill="url(#neonPink)" opacity="0.9"/>
+  <path d="M98 100 L80 64 L74 74 L92 110 Z" fill="url(#neonPink)" opacity="0.9"/>
+  <circle cx="64" cy="30" r="7" fill="none" stroke="url(#neonCyan)" stroke-width="3"/>
+</svg>
