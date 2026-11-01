@@ -73,6 +73,8 @@ func _run_all() -> void:
 		"race_four_ai_finish",
 		"test_checkpoints_validate_in_order",
 		"test_wrong_way_detected",
+		"countdown_sequence_3s",
+		"lap_counting_increments",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1607,4 +1609,143 @@ func test_wrong_way_detected() -> bool:
 	check(not RaceEvent.is_moving_wrong_way(Vector3(5, 0, 0), car, nxt), "driving toward the next gate is not wrong-way")
 	check(RaceEvent.is_moving_wrong_way(Vector3(-5, 0, 0), car, nxt), "driving away from the next gate is wrong-way")
 	check(not RaceEvent.is_moving_wrong_way(Vector3.ZERO, car, nxt), "standing still is not wrong-way")
+	return true
+
+func countdown_sequence_3s() -> bool:
+	var ev := load("res://assets/events/harbor_sprint.tres") as RaceEvent
+	check(ev != null, "harbor_sprint loads for the countdown check")
+	if ev == null:
+		return true
+	check(RaceEvent.validate(ev), "harbor_sprint validates for the countdown check")
+	var mgr := RaceEventManager.new()
+	check(mgr != null, "RaceEventManager instantiates standalone")
+	if mgr == null:
+		return true
+	mgr.event = ev
+	mgr.autostart = false
+	root.add_child(mgr)
+	await process_frame
+	var ticks: Array[int] = []
+	var started := [false]
+	mgr.countdown_tick.connect(func(seconds_left: int) -> void: ticks.append(seconds_left))
+	mgr.race_started.connect(func() -> void: started[0] = true)
+	check(mgr.state == RaceEventManager.State.COUNTDOWN, "fresh manager starts in COUNTDOWN")
+	check(not mgr.can_drive(), "can_drive is false during COUNTDOWN")
+	mgr.start_race()
+	check(mgr.state == RaceEventManager.State.COUNTDOWN, "start_race arms COUNTDOWN")
+	check(mgr.total_laps == ev.laps, "total laps come from event (got %d)" % mgr.total_laps)
+	check(mgr.race_time == 0.0, "race clock is zero during COUNTDOWN")
+	check(not mgr.can_drive(), "can_drive stays false during COUNTDOWN")
+	var fresh := RaceEventManager.new()
+	fresh.event = ev
+	fresh.autostart = false
+	root.add_child(fresh)
+	await process_frame
+	fresh.start_race()
+	var ignored := fresh.register_hit(0)
+	check(ignored == false, "gate hit during COUNTDOWN is ignored")
+	check(fresh.current_lap == 0, "COUNTDOWN hit never counts a lap")
+	check(fresh.wrong_way == false, "COUNTDOWN hit never sets wrong-way")
+	check(fresh.state == RaceEventManager.State.COUNTDOWN, "COUNTDOWN hit keeps COUNTDOWN")
+	var ignored_skip := fresh.register_hit(3)
+	check(ignored_skip == false, "skipped gate during COUNTDOWN is ignored")
+	check(fresh.wrong_way == false, "skipped COUNTDOWN hit never sets wrong-way")
+	for i in 200:
+		await physics_frame
+		if mgr.state == RaceEventManager.State.RACING:
+			break
+	check(mgr.state == RaceEventManager.State.RACING, "reaches RACING within 200 physics frames")
+	check(started[0], "race_started emitted at GO")
+	check(ticks.size() == 3, "countdown_tick fired 3 times (got %d)" % ticks.size())
+	if ticks.size() == 3:
+		check(ticks[0] == 3, "first tick is 3 (got %d)" % ticks[0])
+		check(ticks[1] == 2, "second tick is 2 (got %d)" % ticks[1])
+		check(ticks[2] == 1, "third tick is 1 (got %d)" % ticks[2])
+	else:
+		check(ticks.has(3), "countdown_tick saw 3")
+		check(ticks.has(2), "countdown_tick saw 2")
+		check(ticks.has(1), "countdown_tick saw 1")
+	check(mgr.can_drive(), "can_drive is true in RACING")
+	for i in 30:
+		await physics_frame
+	check(mgr.race_time > 0.0, "race clock runs in RACING (%.3f)" % mgr.race_time)
+	var t0: float = mgr.race_time
+	for i in 30:
+		await physics_frame
+	check(mgr.race_time > t0, "race_time advances while RACING (%.3f > %.3f)" % [mgr.race_time, t0])
+	fresh.queue_free()
+	mgr.queue_free()
+	await process_frame
+	await physics_frame
+	return true
+
+func lap_counting_increments() -> bool:
+	var ev := load("res://assets/events/downtown_gp.tres") as RaceEvent
+	check(ev != null, "downtown_gp loads for the lap check")
+	if ev == null:
+		return true
+	check(RaceEvent.validate(ev), "downtown_gp validates for the lap check")
+	check(RaceEvent.is_circuit(ev), "downtown_gp is a circuit")
+	var count := ev.checkpoints.size()
+	check(count >= 4, "circuit has >= 4 gates (got %d)" % count)
+	var mgr := RaceEventManager.new()
+	check(mgr != null, "RaceEventManager instantiates for the lap check")
+	if mgr == null:
+		return true
+	mgr.event = ev
+	mgr.autostart = false
+	root.add_child(mgr)
+	await process_frame
+	var laps: Array[int] = []
+	var finished := [false]
+	mgr.lap_completed.connect(func(lap_number: int) -> void: laps.append(lap_number))
+	mgr.race_finished.connect(func() -> void: finished[0] = true)
+	mgr.start_race()
+	for i in 300:
+		await physics_frame
+		if mgr.state == RaceEventManager.State.RACING:
+			break
+	check(mgr.state == RaceEventManager.State.RACING, "manager reaches RACING before lap hits")
+	check(mgr.total_laps == ev.laps, "total laps match event (got %d)" % mgr.total_laps)
+	var last := -1
+	for i in count:
+		var nxt: int = RaceEvent.next_index(last, ev)
+		check(nxt == i, "lap 1 gate %d is next after %d" % [i, last])
+		var ok := mgr.register_hit(nxt)
+		check(ok, "lap 1 gate %d validates in order" % nxt)
+		last = nxt
+	check(mgr.current_lap == 1, "in-order gates increment to lap 1 (got %d)" % mgr.current_lap)
+	check(laps.has(1), "lap_completed emitted for lap 1")
+	check(mgr.state == RaceEventManager.State.RACING, "mid-race stays RACING after lap 1")
+	check(not finished[0], "race_finished not emitted mid-race")
+	for lap in range(1, ev.laps):
+		for i in count:
+			var want: int = RaceEvent.next_index(last, ev)
+			var good := mgr.register_hit(want)
+			check(good, "lap %d gate %d validates" % [lap + 1, want])
+			last = want
+		check(mgr.current_lap == lap + 1, "lap counter reaches %d (got %d)" % [lap + 1, mgr.current_lap])
+		check(laps.has(lap + 1), "lap_completed emitted for lap %d" % (lap + 1))
+	check(mgr.state == RaceEventManager.State.FINISHED, "final lap reaches FINISHED")
+	check(finished[0], "race_finished emitted on the final lap")
+	check(mgr.current_lap == ev.laps, "lap counter stops at total laps (%d)" % mgr.current_lap)
+	check(not mgr.can_drive(), "can_drive is false after FINISHED")
+	var tail := mgr.register_hit(0)
+	check(tail == false, "gate hit after FINISHED is ignored")
+	check(mgr.current_lap == ev.laps, "post-finish hit never counts a lap")
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	var saved_lap := mgr.current_lap
+	var saved_time: float = mgr.race_time
+	var saved_state := mgr.state
+	car.reset_vehicle()
+	for i in 60:
+		await physics_frame
+	check(is_instance_valid(car), "car survives reset_vehicle during a finished race")
+	check(mgr.state == saved_state, "car reset keeps race state valid")
+	check(mgr.current_lap == saved_lap, "car reset keeps lap count valid (%d)" % mgr.current_lap)
+	check(absf(mgr.race_time - saved_time) < 0.001, "car reset keeps race clock valid (%.3f)" % mgr.race_time)
+	await _despawn_car()
+	mgr.queue_free()
+	await process_frame
+	await physics_frame
 	return true
