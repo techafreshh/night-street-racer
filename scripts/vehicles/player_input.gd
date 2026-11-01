@@ -13,3 +13,4 @@ func _physics_process(_delta: float) -> void:
 	car.input_brake = Input.get_action_strength("brake")
 	car.input_steer = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
 	car.input_handbrake = Input.is_action_pressed("handbrake")
+	car.input_reset = Input.is_action_pressed("reset_car")

@@ -427,6 +427,33 @@ func test_player_input_bridge() -> bool:
 		await physics_frame
 	check(car.input_throttle > 0.5, "bridge copies accelerate into input_throttle (%.2f)" % car.input_throttle)
 	_release_inputs()
+	for i in 5:
+		await physics_frame
+	Input.action_press("reset_car")
+	for i in 10:
+		await physics_frame
+	check(car.input_reset == true, "bridge copies reset_car into input_reset")
+	Input.action_release("reset_car")
+	for i in 10:
+		await physics_frame
+	check(car.input_reset == false, "bridge releases reset level when reset_car released")
+	var flip := Basis(Vector3(1, 0, 0), PI)
+	var pos: Vector3 = car.global_position
+	car.global_transform = Transform3D(flip, Vector3(pos.x, 0.7, pos.z))
+	car.linear_velocity = Vector3.ZERO
+	car.angular_velocity = Vector3.ZERO
+	await physics_frame
+	Input.action_press("reset_car")
+	for i in 15:
+		await physics_frame
+	var up: Vector3 = car.global_transform.basis.y
+	check(up.y > 0.9, "bridge reset restores upright (up.y %.3f)" % up.y)
+	Input.action_release("reset_car")
+	for i in 90:
+		await physics_frame
+	check(car.linear_velocity.length() < 1.0, "bridge reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	check(car.global_position.y > 0.3 and car.global_position.y < 2.0, "bridge reset parks at sane height (y %.2f)" % car.global_position.y)
+	_release_inputs()
 	instance.queue_free()
 	await process_frame
 	await physics_frame
