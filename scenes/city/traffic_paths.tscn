@@ -1,0 +1,42 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/traffic/traffic_manager.gd" id="1"]
+
+[sub_resource type="Curve3D" id="Curve3D_loop0"]
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, -66, 0.6, -66, 0, 0, 0, 0, 0, 0, 66, 0.6, -66, 0, 0, 0, 0, 0, 0, 66, 0.6, 66, 0, 0, 0, 0, 0, 0, -66, 0.6, 66),
+"tilts": PackedFloat32Array(0, 0, 0, 0)
+}
+closed = true
+bake_interval = 1.0
+point_count = 4
+
+[sub_resource type="Curve3D" id="Curve3D_loop1"]
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, -134, 0.6, -134, 0, 0, 0, 0, 0, 0, 134, 0.6, -134, 0, 0, 0, 0, 0, 0, 134, 0.6, 134, 0, 0, 0, 0, 0, 0, -134, 0.6, 134),
+"tilts": PackedFloat32Array(0, 0, 0, 0)
+}
+closed = true
+bake_interval = 1.0
+point_count = 4
+
+[sub_resource type="Curve3D" id="Curve3D_loop2"]
+_data = {
+"points": PackedVector3Array(0, 0, 0, 0, 0, 0, -2, 0.6, -2, 0, 0, 0, 0, 0, 0, 66, 0.6, -2, 0, 0, 0, 0, 0, 0, 66, 0.6, 66, 0, 0, 0, 0, 0, 0, -2, 0.6, 66),
+"tilts": PackedFloat32Array(0, 0, 0, 0)
+}
+closed = true
+bake_interval = 1.0
+point_count = 4
+
+[node name="TrafficPaths" type="Node3D"]
+script = ExtResource("1")
+
+[node name="LaneLoop0" type="Path3D" parent="."]
+curve = SubResource("Curve3D_loop0")
+
+[node name="LaneLoop1" type="Path3D" parent="."]
+curve = SubResource("Curve3D_loop1")
+
+[node name="LaneLoop2" type="Path3D" parent="."]
+curve = SubResource("Curve3D_loop2")

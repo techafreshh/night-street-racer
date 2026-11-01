@@ -1,6 +1,7 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://scripts/city/district_builder.gd" id="1"]
+[ext_resource type="PackedScene" path="res://scenes/city/traffic_paths.tscn" id="2"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_1"]
 sky_top_color = Color(0.015, 0.02, 0.06, 1)
@@ -441,3 +442,5 @@ shape = SubResource("BoxShape3D_wall_ew")
 
 [node name="SpawnPoint" type="Marker3D" parent="."]
 position = Vector3(0, 1, 0)
+
+[node name="Traffic" parent="." instance=ExtResource("2")]

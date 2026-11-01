@@ -66,6 +66,8 @@ func _run_all() -> void:
 		"test_city_kit_glb_present",
 		"test_city_kit_credits",
 		"test_district_night_uses_kit",
+		"traffic_yields_when_blocked",
+		"traffic_loops_without_error",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1179,4 +1181,118 @@ func test_district_night_uses_kit() -> bool:
 	check(omnis.size() <= 8, "kit pass adds no lights: omnis stay in budget (%d)" % omnis.size())
 	root.remove_child(instance)
 	instance.free()
+	return true
+
+func traffic_yields_when_blocked() -> bool:
+	var lane := Path3D.new()
+	lane.name = "YieldTestLane"
+	var curve := Curve3D.new()
+	curve.add_point(Vector3(0, 0.6, 0))
+	curve.add_point(Vector3(0, 0.6, -100))
+	lane.curve = curve
+	root.add_child(lane)
+	await process_frame
+	await physics_frame
+	var packed := load("res://scenes/vehicles/traffic_car.tscn") as PackedScene
+	check(packed != null, "traffic car scene loads for the yield test")
+	if packed == null:
+		lane.queue_free()
+		await process_frame
+		await physics_frame
+		return true
+	var car := packed.instantiate() as TrafficCar
+	check(car != null, "traffic car instantiates for the yield test")
+	if car == null:
+		lane.queue_free()
+		await process_frame
+		await physics_frame
+		return true
+	root.add_child(car)
+	car.setup(lane, 0.0, 9.0)
+	for i in 90:
+		await physics_frame
+	check(car.speed_ms > 0.8 * 9.0, "traffic reaches cruise unblocked (%.2f)" % car.speed_ms)
+	var blocker := StaticBody3D.new()
+	blocker.name = "YieldTestBlocker"
+	var bshape := CollisionShape3D.new()
+	var bbox := BoxShape3D.new()
+	bbox.size = Vector3(2, 2, 2)
+	bshape.shape = bbox
+	blocker.add_child(bshape)
+	var fwd := -car.global_transform.basis.z
+	var bp: Vector3 = car.global_position
+	blocker.position = Vector3(bp.x, 1.0, bp.z) + fwd * 6.0
+	root.add_child(blocker)
+	for i in 90:
+		await physics_frame
+	check(car.speed_ms < 0.2 * 9.0, "traffic stops when blocked (%.2f)" % car.speed_ms)
+	blocker.queue_free()
+	await process_frame
+	for i in 120:
+		await physics_frame
+		if car.speed_ms > 0.5 * 9.0:
+			break
+	check(car.speed_ms > 0.5 * 9.0, "traffic recovers when cleared (%.2f)" % car.speed_ms)
+	car.queue_free()
+	lane.queue_free()
+	await process_frame
+	await physics_frame
+	return true
+
+func traffic_loops_without_error() -> bool:
+	var packed := load("res://scenes/city/traffic_paths.tscn") as PackedScene
+	check(packed != null, "traffic paths prefab loads for the loop test")
+	if packed == null:
+		return true
+	var paths: Node = packed.instantiate()
+	check(paths != null, "traffic paths instantiate for the loop test")
+	if paths == null:
+		return true
+	root.add_child(paths)
+	await process_frame
+	await physics_frame
+	var lane := paths.get_node_or_null("LaneLoop0") as Path3D
+	check(lane != null and lane.curve != null, "LaneLoop0 provides a lane curve")
+	if lane == null or lane.curve == null:
+		paths.queue_free()
+		await process_frame
+		await physics_frame
+		return true
+	var length := lane.curve.get_baked_length()
+	check(length > 100.0, "LaneLoop0 baked length exceeds 100 m (%.1f)" % length)
+	var car_packed := load("res://scenes/vehicles/traffic_car.tscn") as PackedScene
+	check(car_packed != null, "traffic car scene loads for the loop test")
+	if car_packed == null:
+		paths.queue_free()
+		await process_frame
+		await physics_frame
+		return true
+	var car := car_packed.instantiate() as TrafficCar
+	check(car != null, "loop car instantiates")
+	if car == null:
+		paths.queue_free()
+		await process_frame
+		await physics_frame
+		return true
+	paths.add_child(car)
+	car.setup(lane, length - 20.0, 9.0)
+	var wrapped := false
+	var prev := car.progress
+	for i in 300:
+		await physics_frame
+		if not is_instance_valid(car):
+			break
+		if car.progress < prev:
+			wrapped = true
+		prev = car.progress
+	check(is_instance_valid(car), "loop car survives 300 physics frames")
+	if is_instance_valid(car):
+		check(car.progress >= 0.0 and car.progress < length, "progress stays in [0, length) (%.2f / %.1f)" % [car.progress, length])
+		check(wrapped, "loop car wraps past the closed-loop seam")
+		var p: Vector3 = car.global_position
+		check(absf(p.x) <= 140.0 and absf(p.z) <= 140.0, "loop car stays inside the district (%.1f, %.1f)" % [p.x, p.z])
+		check(p.y > 0.0 and p.y < 5.0, "loop car holds lane height (y %.2f)" % p.y)
+	paths.queue_free()
+	await process_frame
+	await physics_frame
 	return true
