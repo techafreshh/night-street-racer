@@ -42,6 +42,7 @@ func _run_all() -> void:
 		"test_assists_reduce_slip_when_on",
 		"test_suspension_settles_after_drop",
 		"test_reset_after_flip",
+		"test_reset_clears_overpass",
 		"test_reverse_latch_needs_standstill_in_first",
 		"test_reverse_latch_fields_and_throttle_unlatch",
 		"test_field_driven_ignores_reset_key",
@@ -361,6 +362,55 @@ func test_reset_after_flip() -> bool:
 	var up2: Vector3 = car.global_transform.basis.y
 	check(up2.y > 0.9, "inverted car self-rights without input (up.y %.3f)" % up2.y)
 	check(car.linear_velocity.length() < 1.0, "auto reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	await _despawn_car()
+	return true
+
+func test_reset_clears_overpass() -> bool:
+	var base := Vector3(1.0, 1.7, -2.0)
+	var cands := VehicleController.reset_candidates(base)
+	check(cands.size() == 25, "reset spiral has 25 candidates (got %d)" % cands.size())
+	if cands.size() == 25:
+		check(cands[0] == base, "first reset candidate is the flip point")
+		var same_y := true
+		var ordered := true
+		var prev := -1.0
+		for c in cands:
+			if c.y != base.y:
+				same_y = false
+			var r := Vector2(c.x - base.x, c.z - base.z).length()
+			if r < prev - 0.001:
+				ordered = false
+			prev = r
+		check(same_y, "all reset candidates share base height")
+		check(ordered, "reset spiral radii are non-decreasing")
+	var probe := VehicleController.reset_probe_shape() as BoxShape3D
+	check(probe != null and probe.size == Vector3(2.0, 2.0, 4.4), "reset probe covers the car footprint plus margin")
+	var flip := Basis(Vector3(1, 0, 0), PI)
+	var car := await _spawn_car(Vector3(0, 0.7, 0), flip)
+	var deck := StaticBody3D.new()
+	var dshape := CollisionShape3D.new()
+	var dbox := BoxShape3D.new()
+	dbox.size = Vector3(5, 0.5, 5)
+	dshape.shape = dbox
+	deck.add_child(dshape)
+	deck.position = Vector3(0, 2.0, 0)
+	root.add_child(deck)
+	await physics_frame
+	for i in 60:
+		await physics_frame
+	Input.action_press("reset_car")
+	for i in 90:
+		await physics_frame
+	Input.action_release("reset_car")
+	var up: Vector3 = car.global_transform.basis.y
+	check(up.y > 0.9, "overpass reset restores upright (up.y %.3f)" % up.y)
+	check(car.linear_velocity.length() < 1.0, "overpass reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	var p: Vector3 = car.global_position
+	var flat := Vector2(p.x - 0.0, p.z - 0.0).length()
+	check(flat >= 2.5, "overpass reset sidesteps from under the deck (%.2f m)" % flat)
+	var inside := p.x > -3.5 and p.x < 3.5 and p.y > 0.75 and p.y < 3.25 and p.z > -4.7 and p.z < 4.7
+	check(not inside, "overpass reset parks outside the deck (%.2f, %.2f, %.2f)" % [p.x, p.y, p.z])
+	deck.queue_free()
 	await _despawn_car()
 	return true
 

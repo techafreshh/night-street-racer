@@ -80,6 +80,17 @@ var _shift_cooldown := 0.0
 var _inverted_time := 0.0
 var _pending_reset := false
 var _reset_was_down := false
+## Overpass clearance probe: car footprint (1.8 x 4.2) plus margin and headroom.
+## Fun range: probe box size covering the parked car plus clearance.
+const RESET_CLEAR_EXTENTS := Vector3(2.0, 2.0, 4.4)
+## Fun range: 2.0 - 6.0 m lateral search radii for the reset spiral.
+const RESET_LATERAL_RADII: Array[float] = [2.0, 4.0, 6.0]
+## Fun range: 0.0 - 8.0 m maximum vertical lift when laterally blocked.
+const RESET_LIFT_MAX := 8.0
+## Probe center sits one metre above the candidate origin (parked car height).
+const RESET_PROBE_OFFSET := Vector3(0, 1.0, 0)
+var _reset_target := Vector3.ZERO
+var _reset_has_target := false
 var _wheels: Array[Dictionary] = []
 
 
@@ -140,6 +151,66 @@ static func clamp_to_friction_circle(fx: float, fy: float, max_force: float, lat
 	var lat_cap := capped * clampf(lateral_grip_factor, 0.0, 1.0)
 	var room := maxf(lat_cap * lat_cap - minf(cx * cx, lat_cap * lat_cap), 0.0)
 	return Vector2(cx, clampf(fy, -sqrt(room), sqrt(room)))
+
+
+## Deterministic reset candidates: base first, then 8 compass points at
+## each radius in RESET_LATERAL_RADII (25 entries max), all sharing base y.
+## Pure-static so headless tests call it with no scene.
+static func reset_candidates(base: Vector3) -> Array[Vector3]:
+	var out: Array[Vector3] = [base]
+	var dirs: Array[Vector2] = [
+		Vector2(0, -1), Vector2(1, -1).normalized(),
+		Vector2(1, 0), Vector2(1, 1).normalized(),
+		Vector2(0, 1), Vector2(-1, 1).normalized(),
+		Vector2(-1, 0), Vector2(-1, -1).normalized(),
+	]
+	for radius in RESET_LATERAL_RADII:
+		for d in dirs:
+			out.append(Vector3(base.x + d.x * radius, base.y, base.z + d.y * radius))
+	return out
+
+
+## Overlap probe sized to the parked car footprint plus margin.
+static func reset_probe_shape() -> BoxShape3D:
+	var shape := BoxShape3D.new()
+	shape.size = RESET_CLEAR_EXTENTS
+	return shape
+
+
+## First clearance-free reset destination at or near `desired`. Tries the
+## lateral spiral at parked height, then lifts straight up from the
+## original x/z; falls back to the old formula when space state is
+## unavailable (freestanding instance). Never returns an intersecting pose
+## when a clear one was found; when fully blocked, returns the highest
+## probe rather than the intersecting original.
+func find_clear_reset_position(desired: Vector3) -> Vector3:
+	if not is_inside_tree():
+		return desired
+	var world := get_world_3d()
+	if world == null:
+		return desired
+	var space := world.direct_space_state
+	if space == null:
+		return desired
+	var shape := reset_probe_shape()
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = shape
+	query.collide_with_bodies = true
+	query.collide_with_areas = false
+	query.exclude = [get_rid()]
+	for candidate in reset_candidates(desired):
+		query.transform = Transform3D(Basis(), candidate + RESET_PROBE_OFFSET)
+		if space.intersect_shape(query, 1).is_empty():
+			return candidate
+	var lifted := desired + Vector3(0, RESET_LIFT_MAX, 0)
+	var height := 1.0
+	while height <= RESET_LIFT_MAX:
+		var up := Vector3(desired.x, desired.y + height, desired.z)
+		query.transform = Transform3D(Basis(), up + RESET_PROBE_OFFSET)
+		if space.intersect_shape(query, 1).is_empty():
+			return up
+		height += 1.0
+	return lifted
 
 
 func _sample_inputs() -> void:
@@ -353,6 +424,10 @@ func _physics_process(delta: float) -> void:
 	_reset_was_down = reset_down
 	if _inverted_time > 1.0:
 		_pending_reset = true
+	if _pending_reset and not _reset_has_target:
+		var parked := Vector3(global_position.x, maxf(global_position.y, 0.0) + 1.0, global_position.z)
+		_reset_target = find_clear_reset_position(parked)
+		_reset_has_target = true
 
 
 func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
@@ -366,7 +441,11 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 	if fwd_flat.length() > 0.01:
 		yaw = atan2(-fwd_flat.x, -fwd_flat.z)
 	var pos := t.origin
-	pos = Vector3(pos.x, maxf(pos.y, 0.0) + 1.0, pos.z)
+	if _reset_has_target:
+		pos = _reset_target
+		_reset_has_target = false
+	else:
+		pos = Vector3(pos.x, maxf(pos.y, 0.0) + 1.0, pos.z)
 	state.transform = Transform3D(Basis(Vector3.UP, yaw), pos)
 	state.linear_velocity = Vector3.ZERO
 	state.angular_velocity = Vector3.ZERO
