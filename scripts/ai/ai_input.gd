@@ -83,6 +83,9 @@ func _physics_process(_delta: float) -> void:
 	# Shed speed when pointing off-track: the tires cannot cash a large
 	# heading correction at speed, so slow until the turn is achievable.
 	target *= clampf(1.2 - absf(ang) * 1.5, 0.35, 1.0)
+	var band := get_parent().get_node_or_null("RubberBand")
+	if band != null and band.get("enabled") == true:
+		target = clampf(target + float(band.get("current_aid")), 0.0, racing_line.max_speed + float(band.get("max_aid_s")))
 	var err := target - speed
 	if err > deadband:
 		var thr_cap := RacingLine.throttle_cap(lat_load)

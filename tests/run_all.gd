@@ -69,6 +69,8 @@ func _run_all() -> void:
 		"traffic_yields_when_blocked",
 		"traffic_loops_without_error",
 		"ai_completes_loop_without_offroad",
+		"rubber_band_within_bounds",
+		"race_four_ai_finish",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1352,4 +1354,145 @@ func traffic_loops_without_error() -> bool:
 	paths.queue_free()
 	await process_frame
 	await physics_frame
+	return true
+
+func rubber_band_within_bounds() -> bool:
+	var line := load("res://assets/city/test_line.tres") as RacingLine
+	check(line != null, "test_line.tres loads for the rubber-band check")
+	if line == null:
+		return true
+	check(RubberBand.compute_aid(0.0, 3.0) == 0.0, "zero gap yields zero aid")
+	check(RubberBand.compute_aid(1000.0, 3.0) == 3.0, "huge deficit clamps to +max_aid_s")
+	check(RubberBand.compute_aid(-1000.0, 3.0) == -3.0, "huge surplus clamps to -max_aid_s")
+	var toggle := RubberBand.new()
+	toggle.enabled = false
+	check(toggle.aid_for(50.0) == 0.0, "disabled band yields zero aid")
+	toggle.enabled = true
+	check(toggle.aid_for(50.0) > 0.0, "enabled band aids a 50 m deficit")
+	check(toggle.aid_for(50.0) <= 3.0, "enabled aid respects max_aid_s")
+	toggle.free()
+	var sweep_ok := true
+	var g := -500.0
+	while g <= 500.0:
+		if absf(RubberBand.compute_aid(g, 3.0)) > 3.0 + 0.001:
+			sweep_ok = false
+		g += 5.0
+	check(sweep_ok, "gap sweep stays within +/- max_aid_s")
+	var packed := load("res://scenes/vehicles/ai_car.tscn") as PackedScene
+	check(packed != null, "ai_car.tscn loads for the rubber-band run")
+	if packed == null:
+		return true
+	_release_inputs()
+	if is_instance_valid(_car):
+		_car.queue_free()
+		_car = null
+		await process_frame
+		await physics_frame
+	var total := line.track_length()
+	# Rolling two-car duel, both starting on the opening straight with a 20 m
+	# arc deficit: the chaser's proportional aid (1.6 m/s at 20 m) closes the
+	# gap while both cars show their top speed on the straights ahead.
+	var lead_s := 30.0
+	var chase_s := 10.0
+	var lead_p := line.point_at_arc(lead_s)
+	var lead_d := line.point_at_arc(lead_s + 5.0) - lead_p
+	lead_d.y = 0.0
+	lead_d = lead_d.normalized()
+	_car = packed.instantiate() as VehicleController
+	check(_car != null, "band leader instantiates")
+	if _car == null:
+		return true
+	root.add_child(_car)
+	_car.global_transform = Transform3D(Basis(Vector3.UP, atan2(-lead_d.x, -lead_d.z)), lead_p + Vector3(0, 0.9, 0))
+	_car.linear_velocity = lead_d * 18.0
+	_car.add_to_group("racers")
+	var band := _car.get_node_or_null("RubberBand")
+	check(band != null, "AI car carries a RubberBand child")
+	var chaser := packed.instantiate() as VehicleController
+	root.add_child(chaser)
+	var chase_p := line.point_at_arc(chase_s)
+	var chase_d := line.point_at_arc(chase_s + 5.0) - chase_p
+	chase_d.y = 0.0
+	chase_d = chase_d.normalized()
+	chaser.global_transform = Transform3D(Basis(Vector3.UP, atan2(-chase_d.x, -chase_d.z)), chase_p + Vector3(0, 0.9, 0))
+	chaser.linear_velocity = chase_d * 18.0
+	chaser.add_to_group("racers")
+	var gap0 := fposmod(line.arc_of(_car.global_position) - line.arc_of(chaser.global_position), total)
+	check(absf(gap0 - 20.0) < 1.0, "duel starts with a 20 m deficit (%.1f m)" % gap0)
+	var leader_top := 0.0
+	var chaser_top := 0.0
+	for i in 500:
+		await physics_frame
+		if not is_instance_valid(_car) or not is_instance_valid(chaser):
+			break
+		leader_top = maxf(leader_top, _car.speed_ms)
+		chaser_top = maxf(chaser_top, chaser.speed_ms)
+	var gap1 := gap0
+	if is_instance_valid(_car) and is_instance_valid(chaser):
+		gap1 = fposmod(line.arc_of(_car.global_position) - line.arc_of(chaser.global_position), total)
+	check(gap1 < gap0 - 5.0, "aided chaser closes the gap (%.1f m -> %.1f m)" % [gap0, gap1])
+	var delta := absf(leader_top - line.max_speed) / line.max_speed
+	check(delta <= 0.12, "leader max speed within 12%% of line top (%.2f m/s, delta %.1f%%)" % [leader_top, delta * 100.0])
+	var chaser_delta := absf(chaser_top - line.max_speed) / line.max_speed
+	check(chaser_delta <= 0.12, "aided chaser max speed within 12%% of line top (%.2f m/s, delta %.1f%%)" % [chaser_top, chaser_delta * 100.0])
+	if is_instance_valid(chaser):
+		chaser.queue_free()
+		await process_frame
+		await physics_frame
+	await _despawn_car()
+	return true
+
+func race_four_ai_finish() -> bool:
+	var line := load("res://assets/city/test_line.tres") as RacingLine
+	check(line != null, "test_line.tres loads for the four-AI finish")
+	if line == null:
+		return true
+	var packed := load("res://scenes/vehicles/ai_car.tscn") as PackedScene
+	check(packed != null, "ai_car.tscn loads for the four-AI finish")
+	if packed == null:
+		return true
+	_release_inputs()
+	if is_instance_valid(_car):
+		_car.queue_free()
+		_car = null
+		await process_frame
+		await physics_frame
+	var backs: Array[float] = [0.0, 8.0, 16.0, 24.0]
+	var sides: Array[float] = [0.0, -2.0, 2.0, 0.0]
+	var total := line.track_length()
+	var grid: Array[VehicleController] = []
+	for i in 4:
+		var c := packed.instantiate() as VehicleController
+		root.add_child(c)
+		# Stagger along arc length so every car starts on the loop.
+		var gs := fposmod(-backs[i], total)
+		var gp := line.point_at_arc(gs)
+		var gd := line.point_at_arc(gs + 5.0) - gp
+		gd.y = 0.0
+		gd = gd.normalized()
+		var gside := gd.cross(Vector3.UP).normalized()
+		c.global_transform = Transform3D(Basis(Vector3.UP, atan2(-gd.x, -gd.z)), gp + Vector3(0, 0.9, 0) + gside * sides[i])
+		c.add_to_group("racers")
+		grid.append(c)
+		if i == 0:
+			_car = c
+	var start_arcs: Array[float] = []
+	for c in grid:
+		start_arcs.append(line.arc_of(c.global_position))
+	for i in 300:
+		await physics_frame
+	for i in grid.size():
+		var c := grid[i]
+		if not is_instance_valid(c):
+			check(false, "AI car %d survives 300 physics frames" % i)
+			continue
+		var up: Vector3 = c.global_transform.basis.y
+		check(up.y > 0.5, "AI car %d stays upright (up.y %.3f)" % [i, up.y])
+		var advanced := fposmod(line.arc_of(c.global_position) - start_arcs[i], total)
+		check(advanced > 5.0, "AI car %d advances from the grid (%.1f m)" % [i, advanced])
+	print("AI_FINISHED")
+	for c in grid:
+		if is_instance_valid(c) and c != _car:
+			c.queue_free()
+	await _despawn_car()
 	return true
