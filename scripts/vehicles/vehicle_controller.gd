@@ -61,6 +61,7 @@ var input_throttle := 0.0
 var input_brake := 0.0
 var input_steer := 0.0
 var input_handbrake := false
+var input_reset := false
 
 ## Readouts for HUD, AI, and tests.
 var speed_ms := 0.0
@@ -339,7 +340,7 @@ func _physics_process(delta: float) -> void:
 		_inverted_time += delta
 	else:
 		_inverted_time = 0.0
-	var reset_down := Input.is_action_pressed("reset_car")
+	var reset_down := Input.is_action_pressed("reset_car") if use_player_input else input_reset
 	if reset_down and not _reset_was_down:
 		_pending_reset = true
 	_reset_was_down = reset_down
