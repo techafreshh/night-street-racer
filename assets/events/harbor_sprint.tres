@@ -1,0 +1,14 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/race/race_event.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+route_id = "harbor_sprint"
+event_type = 0
+laps = 1
+opponents = 3
+unlock_req = &""
+reward = 500
+checkpoints = PackedVector3Array(-102, 1, 136, -51, 1, 136, 0, 1, 136, 51, 1, 136, 102, 1, 136)
+checkpoint_radius = 10.0
