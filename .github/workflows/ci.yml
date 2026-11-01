@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Godot
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+
+      - name: Import project (populates .godot/ on a fresh checkout)
+        run: godot --headless --path . --import
+
+      - name: Scene boot check
+        run: godot --headless --path . scenes/ui/main_menu.tscn --quit-after 60
+
+      - name: Run GDScript tests
+        timeout-minutes: 5
+        run: godot --headless --path . --script res://tests/run_all.gd
