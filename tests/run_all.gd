@@ -36,6 +36,7 @@ func _run_all() -> void:
 		"test_main_menu_scene",
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
+		"test_coast_upshifts_without_throttle",
 		"test_brake_20ms_within_30m",
 		"test_handbrake_reduces_rear_grip",
 		"test_assists_reduce_slip_when_on",
@@ -209,6 +210,22 @@ func test_accel_reaches_25ms_in_8s() -> bool:
 	check(top >= 25.0, "reaches 25 m/s within 8 s (top %.2f)" % top)
 	check(car.current_gear >= 3, "automatic gearbox shifts to gear >= 3 (gear %d)" % car.current_gear)
 	check(car.engine_rpm >= 800.0 and car.engine_rpm <= 7000.0, "engine rpm stays within limits (%.0f)" % car.engine_rpm)
+	await _despawn_car()
+	return true
+
+func test_coast_upshifts_without_throttle() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 0.0
+	car.input_steer = 0.0
+	car.current_gear = 1
+	car.linear_velocity = Vector3(0, 0, -20)
+	for i in 30:
+		await physics_frame
+	check(car.input_throttle == 0.0, "coasting applies zero throttle")
+	check(car.current_gear >= 2, "coasting at redline upshifts without throttle (gear %d)" % car.current_gear)
+	check(car.engine_rpm <= car.shift_up_rpm, "coasting upshift drops rpm to the taller ratio (%.0f)" % car.engine_rpm)
 	await _despawn_car()
 	return true
 
