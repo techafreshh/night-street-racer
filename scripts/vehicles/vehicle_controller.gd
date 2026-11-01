@@ -1,0 +1,299 @@
+class_name VehicleController
+extends RigidBody3D
+## Shared arcade physics car for player and AI alike.
+## Custom raycast car on a RigidBody3D: 4 RayCast3D wheels measure
+## compression each physics tick; suspension (spring + bump/rebound
+## damper, travel-clamped) and tire forces (load-sensitive slip-angle
+## lateral force with a friction-circle cap) are applied with
+## apply_force at the wheel/contact offset so weight transfer and yaw
+## emerge from the solver. Engine torque curve plus a 5-speed automatic
+## gearbox feeds a FWD/RWD/AWD axle split; the handbrake cuts the rear
+## lateral cap and locks the rears. Flip recovery teleports safely via
+## _integrate_forces. Driven at fixed 60 Hz physics.
+## Input seam: with use_player_input the controller samples InputMap
+## actions (accelerate/brake/steer_left/steer_right/handbrake/reset_car);
+## otherwise it reads the input_* fields (headless tests, AI racers).
+
+enum DriveMode { FWD, RWD, AWD }
+
+## Suspension (per wheel).
+@export var spring_rate := 36000.0
+@export var damper_bump := 4500.0
+@export var damper_rebound := 6000.0
+@export var wheel_travel := 0.30
+@export var suspension_rest_length := 0.60
+## Tires.
+@export var tire_grip := 1.0
+@export var cornering_stiffness := 12000.0
+@export var surface_grip := 1.0
+## Engine and gearbox.
+@export var engine_max_torque := 380.0
+@export var gear_ratios: Array[float] = [3.2, 2.1, 1.5, 1.1, 0.85]
+@export var final_drive := 3.9
+@export var shift_up_rpm := 5500.0
+@export var shift_down_rpm := 2500.0
+@export var drive_mode: DriveMode = DriveMode.RWD
+## Steering and brakes.
+@export var max_steer_angle := 0.55
+@export var steer_speed_falloff := 0.05
+@export var brake_force := 5500.0
+@export var handbrake_force := 2500.0
+@export var handbrake_grip_factor := 0.1
+## Chassis.
+@export var wheel_radius := 0.33
+@export var drag_linear := 60.0
+@export var drag_quadratic := 1.2
+@export var rolling_resistance := 150.0
+@export var reverse_max_speed := 8.0
+
+## Swappable input source: sample InputMap when true, fields when false.
+@export var use_player_input := true
+var input_throttle := 0.0
+var input_brake := 0.0
+var input_steer := 0.0
+var input_handbrake := false
+
+## Readouts for HUD, AI, and tests.
+var speed_ms := 0.0
+var current_gear := 1
+var engine_rpm := 800.0
+var is_grounded := false
+
+var _throttle := 0.0
+var _brake := 0.0
+var _steer := 0.0
+var _handbrake := false
+var _current_steer := 0.0
+var _reversing := false
+var _shift_cooldown := 0.0
+var _inverted_time := 0.0
+var _pending_reset := false
+var _reset_was_down := false
+var _wheels: Array[Dictionary] = []
+
+
+func _ready() -> void:
+	for wheel_name in ["WheelFL", "WheelFR", "WheelRL", "WheelRR"]:
+		var ray := get_node_or_null(wheel_name) as RayCast3D
+		if ray == null:
+			continue
+		ray.add_exception(self)
+		_wheels.append({
+			"node": ray,
+			"front": wheel_name == "WheelFL" or wheel_name == "WheelFR",
+			"rear": wheel_name == "WheelRL" or wheel_name == "WheelRR",
+			"prev_comp": 0.0,
+		})
+
+
+func reset_vehicle() -> void:
+	_pending_reset = true
+
+
+static func compute_suspension_force(compression: float, compression_velocity: float, spring: float, damp_bump: float, damp_rebound: float) -> float:
+	var rate := damp_bump if compression_velocity >= 0.0 else damp_rebound
+	return maxf(0.0, spring * maxf(compression, 0.0) + rate * compression_velocity)
+
+
+static func compute_lateral_force(slip_angle: float, wheel_load: float, grip: float, stiffness: float, surface: float = 1.0, grip_factor: float = 1.0) -> float:
+	var load := maxf(wheel_load, 0.0)
+	var load_factor := clampf(load / 3500.0, 0.25, 1.6)
+	var raw := -stiffness * slip_angle * load_factor
+	var cap := grip * load * surface * grip_factor
+	return clampf(raw, -cap, cap)
+
+
+static func clamp_to_friction_circle(fx: float, fy: float, max_force: float, lateral_grip_factor: float = 1.0) -> Vector2:
+	var capped := maxf(max_force, 0.0)
+	var cx := clampf(fx, -capped, capped)
+	var lat_cap := capped * clampf(lateral_grip_factor, 0.0, 1.0)
+	var room := maxf(lat_cap * lat_cap - minf(cx * cx, lat_cap * lat_cap), 0.0)
+	return Vector2(cx, clampf(fy, -sqrt(room), sqrt(room)))
+
+
+func _sample_inputs() -> void:
+	if use_player_input:
+		_throttle = Input.get_action_strength("accelerate")
+		_brake = Input.get_action_strength("brake")
+		_steer = Input.get_action_strength("steer_right") - Input.get_action_strength("steer_left")
+		_handbrake = Input.is_action_pressed("handbrake")
+	else:
+		_throttle = clampf(input_throttle, 0.0, 1.0)
+		_brake = clampf(input_brake, 0.0, 1.0)
+		_steer = clampf(input_steer, -1.0, 1.0)
+		_handbrake = input_handbrake
+
+
+func _sample_torque(rpm: float) -> float:
+	var pts: Array[Vector2] = [
+		Vector2(800.0, 0.55), Vector2(1500.0, 0.75), Vector2(3000.0, 1.0),
+		Vector2(4500.0, 1.0), Vector2(5500.0, 0.85), Vector2(6500.0, 0.6),
+		Vector2(7200.0, 0.4),
+	]
+	if rpm <= pts[0].x:
+		return engine_max_torque * pts[0].y
+	for i in range(1, pts.size()):
+		if rpm <= pts[i].x:
+			var t := (rpm - pts[i - 1].x) / (pts[i].x - pts[i - 1].x)
+			return engine_max_torque * lerpf(pts[i - 1].y, pts[i].y, t)
+	return engine_max_torque * pts[pts.size() - 1].y
+
+
+func _driven_wheel_count() -> int:
+	match drive_mode:
+		DriveMode.FWD, DriveMode.RWD:
+			return 2
+		_:
+			return 4
+
+
+func _is_driven(front: bool) -> bool:
+	match drive_mode:
+		DriveMode.FWD:
+			return front
+		DriveMode.RWD:
+			return not front
+		_:
+			return true
+
+
+func _physics_process(delta: float) -> void:
+	_sample_inputs()
+	var basis_xform := global_transform.basis
+	var up := basis_xform.y
+	var fwd := -basis_xform.z
+	var right := basis_xform.x
+	var forward_speed := linear_velocity.dot(fwd)
+	speed_ms = forward_speed
+
+	# Speed-sensitive front steering, smoothed toward target.
+	var steer_target := _steer * max_steer_angle / (1.0 + absf(forward_speed) * steer_speed_falloff)
+	_current_steer = move_toward(_current_steer, steer_target, 5.0 * delta)
+
+	# Minimal reverse latch: hold brake at a near-standstill in 1st to
+	# back up; any throttle unlatches back to forward drive.
+	if _brake > 0.5 and forward_speed > -0.5 and forward_speed < 0.8 and current_gear == 1 and _throttle < 0.05:
+		_reversing = true
+	if _throttle > 0.05:
+		_reversing = false
+
+	# Engine force from the torque curve at the current rpm and gear.
+	var gear_ratio: float = gear_ratios[clampi(current_gear - 1, 0, gear_ratios.size() - 1)]
+	var engine_force_total := _throttle * _sample_torque(engine_rpm) * gear_ratio * final_drive / wheel_radius
+	var driven_count := _driven_wheel_count()
+
+	var grounded := 0
+	for w in _wheels:
+		var ray: RayCast3D = w["node"]
+		ray.force_raycast_update()
+		var front: bool = w["front"]
+		var rear: bool = w["rear"]
+
+		# Suspension: compression from ray length, damper from its rate.
+		var comp := 0.0
+		var contact := ray.global_transform.origin + ray.target_position
+		var has_contact := false
+		if ray.is_colliding():
+			var hit := ray.get_collision_point()
+			contact = hit
+			comp = clampf(suspension_rest_length - ray.global_transform.origin.distance_to(hit), 0.0, wheel_travel)
+			has_contact = true
+			grounded += 1
+		var prev_comp: float = w["prev_comp"]
+		var comp_vel := (comp - prev_comp) / maxf(delta, 0.0001)
+		w["prev_comp"] = comp
+		if not has_contact:
+			continue
+		var susp := compute_suspension_force(comp, comp_vel, spring_rate, damper_bump, damper_rebound)
+
+		var r := contact - global_position
+		var vel := linear_velocity + angular_velocity.cross(r)
+		var wheel_steer := _current_steer if front else 0.0
+		var w_fwd := fwd * cos(wheel_steer) + right * sin(wheel_steer)
+		var w_right := right * cos(wheel_steer) - fwd * sin(wheel_steer)
+		var f_speed := vel.dot(w_fwd)
+		var l_speed := vel.dot(w_right)
+		var slip := atan2(l_speed, absf(f_speed) + 1.0)
+		var ramp := clampf(absf(f_speed) / 2.0, 0.0, 1.0)
+
+		# Longitudinal: drive split per drive_mode, service brake on all
+		# wheels, handbrake lock on the rears.
+		var fx := 0.0
+		if _reversing and _is_driven(front):
+			if f_speed > -reverse_max_speed:
+				fx = -_brake * engine_max_torque * 0.6 * gear_ratios[0] * final_drive / wheel_radius / float(driven_count)
+		elif _is_driven(front):
+			fx += engine_force_total / float(driven_count)
+		if _handbrake and rear:
+			if absf(f_speed) > 0.5:
+				fx += -signf(f_speed) * handbrake_force
+			else:
+				fx += -f_speed * handbrake_force * 2.0
+		elif _brake > 0.01:
+			if absf(f_speed) > 0.5:
+				fx += -signf(f_speed) * _brake * brake_force
+			else:
+				fx += -f_speed * _brake * brake_force * 2.0
+
+		var lat_factor := handbrake_grip_factor if (_handbrake and rear) else 1.0
+		var fy := compute_lateral_force(slip, susp, tire_grip, cornering_stiffness, surface_grip, lat_factor) * ramp
+		var max_f := tire_grip * susp * surface_grip
+		var capped := clamp_to_friction_circle(fx, fy, max_f, lat_factor)
+		apply_force(up * susp + w_fwd * capped.x + w_right * capped.y, r)
+
+	is_grounded = grounded > 0
+
+	# Central drag plus rolling resistance.
+	var horizontal := Vector3(linear_velocity.x, 0.0, linear_velocity.z)
+	var drag_force := -horizontal * (drag_linear + drag_quadratic * horizontal.length())
+	apply_central_force(drag_force)
+	if absf(forward_speed) > 0.1:
+		apply_central_force(-fwd * signf(forward_speed) * rolling_resistance)
+
+	# Automatic gearbox with shift hysteresis from vehicle speed.
+	var wheel_rps := absf(forward_speed) / (TAU * wheel_radius)
+	engine_rpm = maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0)
+	_shift_cooldown -= delta
+	if not _reversing and _shift_cooldown <= 0.0:
+		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm and _throttle > 0.1:
+			current_gear += 1
+			_shift_cooldown = 0.4
+		elif current_gear > 1 and engine_rpm < shift_down_rpm:
+			current_gear -= 1
+			_shift_cooldown = 0.4
+
+	# Reset on demand (press edge) plus automatic recovery when inverted
+	# and slow. The edge fires once per press so holding the key parks
+	# the car instead of climbing.
+	if up.y < 0.3 and linear_velocity.length() < 3.0:
+		_inverted_time += delta
+	else:
+		_inverted_time = 0.0
+	var reset_down := Input.is_action_pressed("reset_car")
+	if reset_down and not _reset_was_down:
+		_pending_reset = true
+	_reset_was_down = reset_down
+	if _inverted_time > 1.0:
+		_pending_reset = true
+
+
+func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
+	if not _pending_reset:
+		return
+	_pending_reset = false
+	var t := state.transform
+	var fwd_flat := -t.basis.z
+	fwd_flat.y = 0.0
+	var yaw := 0.0
+	if fwd_flat.length() > 0.01:
+		yaw = atan2(-fwd_flat.x, -fwd_flat.z)
+	var pos := t.origin
+	pos = Vector3(pos.x, maxf(pos.y, 0.0) + 1.0, pos.z)
+	state.transform = Transform3D(Basis(Vector3.UP, yaw), pos)
+	state.linear_velocity = Vector3.ZERO
+	state.angular_velocity = Vector3.ZERO
+	current_gear = 1
+	engine_rpm = 800.0
+	_reversing = false
+	_inverted_time = 0.0
+	_current_steer = 0.0
