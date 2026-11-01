@@ -26,6 +26,7 @@ func _run_all() -> void:
 	_make_ground()
 	var tests: Array[String] = [
 		"test_project_name",
+		"test_application_icon_configured",
 		"test_physics_ticks",
 		"test_renderer_method",
 		"test_physics_engine_3d",
@@ -113,6 +114,18 @@ func _yaw_of(car: VehicleController) -> float:
 
 func test_project_name() -> bool:
 	check(ProjectSettings.get_setting("application/config/name") == "Night Street Racer", "project name is Night Street Racer")
+	return true
+
+func test_application_icon_configured() -> bool:
+	var path := str(ProjectSettings.get_setting("application/config/icon"))
+	check(path != "", "application icon setting is configured")
+	check(path.ends_with(".svg"), "application icon is an SVG (got %s)" % path)
+	check(ResourceLoader.exists(path), "application icon resource exists: %s" % path)
+	var icon := load(path) as Texture2D
+	check(icon != null, "application icon loads as Texture2D")
+	if icon != null:
+		check(icon.get_width() > 0, "application icon width > 0 (got %d)" % icon.get_width())
+		check(icon.get_height() > 0, "application icon height > 0 (got %d)" % icon.get_height())
 	return true
 
 func test_physics_ticks() -> bool:
