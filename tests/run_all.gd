@@ -71,6 +71,8 @@ func _run_all() -> void:
 		"ai_completes_loop_without_offroad",
 		"rubber_band_within_bounds",
 		"race_four_ai_finish",
+		"test_checkpoints_validate_in_order",
+		"test_wrong_way_detected",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1495,4 +1497,114 @@ func race_four_ai_finish() -> bool:
 		if is_instance_valid(c) and c != _car:
 			c.queue_free()
 	await _despawn_car()
+	return true
+
+func test_checkpoints_validate_in_order() -> bool:
+	var dir := DirAccess.open("res://assets/events")
+	check(dir != null, "assets/events directory opens")
+	if dir == null:
+		return true
+	var stems: Array[String] = []
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if not dir.current_is_dir() and entry.ends_with(".tres"):
+			stems.append(entry.get_basename())
+		entry = dir.get_next()
+	dir.list_dir_end()
+	stems.sort()
+	check(stems.size() == 5, "assets/events holds exactly 5 .tres files (got %d)" % stems.size())
+	var wanted: Array[String] = ["alley_sprint", "bayline_circuit", "downtown_gp", "harbor_sprint", "neon_loop"]
+	for w in wanted:
+		check(stems.has(w), "event resource present: %s" % w)
+	for stem in stems:
+		var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
+		check(ev != null, "%s loads as RaceEvent" % stem)
+		if ev == null:
+			continue
+		check(ev.route_id == stem, "%s route_id matches stem (got %s)" % [stem, ev.route_id])
+		check(RaceEvent.validate(ev), "%s passes RaceEvent.validate()" % stem)
+		check(ev.checkpoint_radius >= RaceEvent.CHECKPOINT_RADIUS_MIN and ev.checkpoint_radius <= RaceEvent.CHECKPOINT_RADIUS_MAX, "%s radius in range (%.1f)" % [stem, ev.checkpoint_radius])
+		if RaceEvent.is_sprint(ev):
+			check(ev.laps == RaceEvent.SPRINT_LAPS, "%s sprint encodes 1 lap (got %d)" % [stem, ev.laps])
+		else:
+			check(RaceEvent.is_circuit(ev), "%s non-sprint is a circuit" % stem)
+			check(ev.laps >= RaceEvent.CIRCUIT_LAPS_MIN, "%s circuit encodes 2+ laps (got %d)" % [stem, ev.laps])
+		var count := ev.checkpoints.size()
+		check(count >= RaceEvent.CHECKPOINT_COUNT_MIN, "%s has >= 4 gates (got %d)" % [stem, count])
+		var last := -1
+		for i in count:
+			var nxt: int = RaceEvent.next_index(last, ev)
+			check(nxt == i, "%s gate %d is next after %d" % [stem, i, last])
+			check(RaceEvent.is_correct_hit(i, last, ev), "%s gate %d validates in order" % [stem, i])
+			check(not RaceEvent.is_wrong_way(i, last, ev), "%s expected gate %d is not wrong-way" % [stem, i])
+			var prev := last
+			last = i
+			if i == count - 1 and RaceEvent.is_circuit(ev):
+				check(RaceEvent.completes_lap(i, prev, ev), "%s final gate completes the lap" % stem)
+		if RaceEvent.is_circuit(ev):
+			check(RaceEvent.next_index(last, ev) == 0, "%s circuit wraps to gate 0" % stem)
+		else:
+			check(RaceEvent.next_index(last, ev) == -1, "%s sprint finishes (-1)" % stem)
+			check(not RaceEvent.completes_lap(last, count - 2, ev), "%s sprint finish is not a lap" % stem)
+	var gate_packed = load("res://scenes/races/checkpoint.tscn")
+	check(gate_packed is PackedScene, "checkpoint.tscn loads as PackedScene")
+	if gate_packed is PackedScene:
+		var gate: Node = (gate_packed as PackedScene).instantiate()
+		check(gate != null, "checkpoint gate instantiates")
+		if gate != null:
+			check(gate is Checkpoint, "checkpoint root is a Checkpoint")
+			check(gate.has_signal("passed"), "checkpoint exposes passed signal")
+			check(gate.get_node_or_null("CollisionShape3D") != null, "checkpoint has a CollisionShape3D")
+			check(gate.get_node_or_null("MeshInstance3D") != null, "checkpoint has a MeshInstance3D")
+			gate.free()
+	var routes: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]
+	for stem in routes:
+		var packed = load("res://scenes/races/route_%s.tscn" % stem)
+		check(packed is PackedScene, "route_%s.tscn loads as PackedScene" % stem)
+		if not (packed is PackedScene):
+			continue
+		var inst: Node = (packed as PackedScene).instantiate()
+		check(inst != null, "route_%s instantiates" % stem)
+		if inst == null:
+			continue
+		check(inst is RaceRoute, "route_%s root is a RaceRoute" % stem)
+		root.add_child(inst)
+		await process_frame
+		var route := inst as RaceRoute
+		if route != null and route.event != null:
+			check(route.gate_count() == route.event.checkpoints.size(), "route_%s spawns one gate per checkpoint (%d)" % [stem, route.gate_count()])
+		root.remove_child(inst)
+		inst.free()
+	return true
+
+func test_wrong_way_detected() -> bool:
+	var ev := load("res://assets/events/downtown_gp.tres") as RaceEvent
+	check(ev != null, "downtown_gp loads for the wrong-way check")
+	if ev == null:
+		return true
+	var count := ev.checkpoints.size()
+	check(count >= 4, "circuit has >= 4 gates (got %d)" % count)
+	check(RaceEvent.is_wrong_way(2, -1, ev), "skipping to gate 2 at start is wrong-way")
+	check(not RaceEvent.is_correct_hit(2, -1, ev), "skipped gate 2 is not a correct hit")
+	check(not RaceEvent.is_wrong_way(0, -1, ev), "expected gate 0 at start is not wrong-way")
+	check(RaceEvent.is_correct_hit(0, -1, ev), "gate 0 at start is a correct hit")
+	check(not RaceEvent.is_wrong_way(0, 0, ev), "duplicate of last gate is not wrong-way")
+	check(not RaceEvent.is_correct_hit(0, 0, ev), "duplicate hit is not a correct hit")
+	check(RaceEvent.is_wrong_way(3, 1, ev), "skipping from gate 1 to gate 3 is wrong-way")
+	check(RaceEvent.is_wrong_way(0, 2, ev), "going backward from gate 2 to gate 0 is wrong-way")
+	check(not RaceEvent.is_wrong_way(2, 1, ev), "expected gate 2 after gate 1 is not wrong-way")
+	check(not RaceEvent.is_wrong_way(0, count - 1, ev), "lap wrap to gate 0 is not wrong-way")
+	check(not RaceEvent.is_wrong_way(-1, 1, ev), "sentinel hit is not wrong-way")
+	check(not RaceEvent.is_wrong_way(count, 1, ev), "out-of-range hit is not wrong-way")
+	var sprint := load("res://assets/events/harbor_sprint.tres") as RaceEvent
+	check(sprint != null, "harbor_sprint loads for the wrong-way check")
+	if sprint != null:
+		check(RaceEvent.is_wrong_way(3, 0, sprint), "sprint skip from gate 0 to gate 3 is wrong-way")
+		check(not RaceEvent.is_wrong_way(1, 0, sprint), "sprint expected gate 1 is not wrong-way")
+	var car := Vector3(0, 1, 0)
+	var nxt := Vector3(10, 1, 0)
+	check(not RaceEvent.is_moving_wrong_way(Vector3(5, 0, 0), car, nxt), "driving toward the next gate is not wrong-way")
+	check(RaceEvent.is_moving_wrong_way(Vector3(-5, 0, 0), car, nxt), "driving away from the next gate is wrong-way")
+	check(not RaceEvent.is_moving_wrong_way(Vector3.ZERO, car, nxt), "standing still is not wrong-way")
 	return true
