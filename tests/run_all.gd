@@ -400,10 +400,17 @@ func test_player_input_bridge() -> bool:
 	check(packed != null, "test_ground.tscn loads for the bridge test")
 	if packed == null:
 		return true
+	if is_instance_valid(_ground):
+		_ground.queue_free()
+		_ground = null
+		await process_frame
+		await physics_frame
 	var instance: Node = packed.instantiate()
 	root.add_child(instance)
 	await process_frame
 	await physics_frame
+	check(not is_instance_valid(_ground), "bridge test runs on exclusive scene ground (shared slab removed)")
+	check(instance.get_node_or_null("Ground") != null, "scene instance provides the single Ground plane")
 	var car: VehicleController = null
 	for child in instance.get_children():
 		if child is VehicleController:
@@ -412,6 +419,8 @@ func test_player_input_bridge() -> bool:
 	if car == null:
 		instance.queue_free()
 		await process_frame
+		await physics_frame
+		_make_ground()
 		return true
 	Input.action_press("accelerate")
 	for i in 30:
@@ -421,6 +430,7 @@ func test_player_input_bridge() -> bool:
 	instance.queue_free()
 	await process_frame
 	await physics_frame
+	_make_ground()
 	return true
 
 func test_steer_turns_at_speed() -> bool:
