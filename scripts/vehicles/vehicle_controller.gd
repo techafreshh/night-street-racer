@@ -12,7 +12,8 @@ extends RigidBody3D
 ## _integrate_forces. Driven at fixed 60 Hz physics.
 ## Input seam: with use_player_input the controller samples InputMap
 ## actions (accelerate/brake/steer_left/steer_right/handbrake/reset_car);
-## otherwise it reads the input_* fields (headless tests, AI racers).
+## otherwise it reads the input_throttle/input_brake/input_steer/
+## input_handbrake/input_reset fields (headless tests, AI racers).
 
 enum DriveMode { FWD, RWD, AWD }
 
