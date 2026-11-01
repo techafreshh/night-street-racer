@@ -41,6 +41,8 @@ func _run_all() -> void:
 		"test_assists_reduce_slip_when_on",
 		"test_suspension_settles_after_drop",
 		"test_reset_after_flip",
+		"test_reverse_latch_needs_standstill_in_first",
+		"test_reverse_latch_fields_and_throttle_unlatch",
 		"test_field_driven_ignores_reset_key",
 		"test_steer_turns_at_speed",
 		"test_test_ground_loads",
@@ -342,6 +344,51 @@ func test_reset_after_flip() -> bool:
 	var up2: Vector3 = car.global_transform.basis.y
 	check(up2.y > 0.9, "inverted car self-rights without input (up.y %.3f)" % up2.y)
 	check(car.linear_velocity.length() < 1.0, "auto reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	await _despawn_car()
+	return true
+
+func test_reverse_latch_needs_standstill_in_first() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	Input.action_press("accelerate")
+	for i in 12 * 60:
+		await physics_frame
+		if car.speed_ms >= 25.0:
+			break
+	check(car.speed_ms >= 25.0, "reaches 25 m/s before latch test (%.2f)" % car.speed_ms)
+	check(car.current_gear >= 3, "gear >= 3 at speed (gear %d)" % car.current_gear)
+	Input.action_release("accelerate")
+	Input.action_press("brake")
+	for i in 6 * 60:
+		await physics_frame
+		if car.speed_ms <= 0.8:
+			break
+		check(car.speed_ms > -0.5, "braking at speed never reverses (%.2f)" % car.speed_ms)
+	for i in 6 * 60:
+		await physics_frame
+		if car.speed_ms < -1.0 and car.current_gear == 1:
+			break
+	check(car.speed_ms < -1.0, "continued brake hold backs up (%.2f)" % car.speed_ms)
+	check(car.current_gear == 1, "latched in 1st gear (gear %d)" % car.current_gear)
+	await _despawn_car()
+	return true
+
+func test_reverse_latch_fields_and_throttle_unlatch() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 1.0
+	for i in 3 * 60:
+		await physics_frame
+		if car.speed_ms < -1.0:
+			break
+	check(car.speed_ms < -1.0, "field-driven brake hold latches reverse (%.2f)" % car.speed_ms)
+	car.input_brake = 0.0
+	car.input_throttle = 1.0
+	for i in 3 * 60:
+		await physics_frame
+		if car.speed_ms > 1.0:
+			break
+	check(car.speed_ms > 1.0, "throttle unlatches to forward drive (%.2f)" % car.speed_ms)
 	await _despawn_car()
 	return true
 
