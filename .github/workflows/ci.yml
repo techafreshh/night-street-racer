@@ -32,6 +32,18 @@ jobs:
       - name: District night boot check
         run: godot --headless --path . scenes/city/district_night.tscn --quit-after 120
 
+      - name: Tuner car coupe boot check
+        run: godot --headless --path . scenes/vehicles/car_coupe.tscn --quit-after 60
+
+      - name: Tuner car hatch boot check
+        run: godot --headless --path . scenes/vehicles/car_hatch.tscn --quit-after 60
+
+      - name: Tuner car sedan boot check
+        run: godot --headless --path . scenes/vehicles/car_sedan.tscn --quit-after 60
+
+      - name: Tuner car awd boot check
+        run: godot --headless --path . scenes/vehicles/car_awd.tscn --quit-after 60
+
       - name: Run GDScript tests
         timeout-minutes: 5
         run: godot --headless --path . --script res://tests/run_all.gd

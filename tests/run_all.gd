@@ -77,6 +77,9 @@ func _run_all() -> void:
 		"lap_counting_increments",
 		"positions_sort_by_progress",
 		"results_hold_all_finishers",
+		"test_car_kit_glb_present",
+		"test_car_kit_credits",
+		"test_car_scenes_load",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1847,4 +1850,123 @@ func results_hold_all_finishers() -> bool:
 	check(table.size() == 0, "clear empties the table")
 	check(table.ordered_results().is_empty(), "ordered results empty after clear")
 	check(table.place_of("player") == 0, "no place survives clear")
+	return true
+
+func test_car_kit_glb_present() -> bool:
+	var stems: Array[String] = ["coupe", "hatch", "sedan", "awd"]
+	var base := DirAccess.open("res://assets/cars")
+	check(base != null, "assets/cars directory opens")
+	if base == null:
+		return true
+	var with_glb := 0
+	base.list_dir_begin()
+	var entry := base.get_next()
+	while entry != "":
+		if base.current_is_dir() and not entry.begins_with("."):
+			if FileAccess.file_exists("res://assets/cars/%s/%s.glb" % [entry, entry]):
+				with_glb += 1
+		entry = base.get_next()
+	base.list_dir_end()
+	check(with_glb == 4, "assets/cars holds 4 subfolders each with a .glb (got %d)" % with_glb)
+	for stem in stems:
+		check(DirAccess.open("res://assets/cars/%s" % stem) != null, "car folder exists: %s" % stem)
+		var path := "res://assets/cars/%s/%s.glb" % [stem, stem]
+		check(FileAccess.file_exists(path), "car body vendored: %s" % path)
+		var packed = load(path)
+		check(packed is PackedScene, "car %s loads as PackedScene" % stem)
+		if packed is PackedScene:
+			var inst: Node = (packed as PackedScene).instantiate()
+			check(inst != null, "car %s instantiates" % stem)
+			if inst != null:
+				inst.free()
+	return true
+
+func test_car_kit_credits() -> bool:
+	check(FileAccess.file_exists("res://docs/CREDITS"), "docs/CREDITS exists")
+	var text := ""
+	if FileAccess.file_exists("res://docs/CREDITS"):
+		text = FileAccess.get_file_as_string("res://docs/CREDITS")
+	check(text.contains("Sketchfab"), "CREDITS names Sketchfab")
+	check(text.contains("Grab3D"), "CREDITS names Grab3D")
+	check(text.contains("CC0"), "CREDITS records the CC0 license")
+	check(text.contains("No third-party file is vendored"), "CREDITS states no third-party file is vendored")
+	var stems: Array[String] = ["coupe", "hatch", "sedan", "awd"]
+	for stem in stems:
+		check(text.contains("car_" + stem) or text.contains("/" + stem + "/"), "CREDITS covers car_" + stem)
+	check(text.contains("https://sketchfab.com/3d-models/free-concept-car-006-public-domain-cc0-a4e19bb6e6394c4a95d4319ef7d265ba"), "CREDITS pins the coupe URL")
+	check(text.contains("https://sketchfab.com/3d-models/lowpoly-car-05d3cd418d334b55b4dc3f92a67bcb8c"), "CREDITS pins the hatch URL")
+	check(text.contains("https://sketchfab.com/3d-models/free-low-poly-vehicles-pack-cb7640039e7a40679a53be705ebff50e"), "CREDITS pins the sedan URL")
+	check(text.contains("https://grab3d.com/free-3d-models/car/"), "CREDITS pins the awd URL")
+	return true
+
+func test_car_scenes_load() -> bool:
+	var stems: Array[String] = ["coupe", "hatch", "sedan", "awd"]
+	var tunes := {
+		"coupe": "res://assets/cars/tunes/sport_tune.tres",
+		"hatch": "res://assets/cars/tunes/drift_tune.tres",
+		"sedan": "res://assets/cars/tunes/default_tune.tres",
+		"awd": "res://assets/cars/tunes/drag_tune.tres",
+	}
+	var modes := {
+		"coupe": VehicleController.DriveMode.RWD,
+		"hatch": VehicleController.DriveMode.RWD,
+		"sedan": VehicleController.DriveMode.RWD,
+		"awd": VehicleController.DriveMode.AWD,
+	}
+	var wheels := {
+		"WheelFL": Vector3(-0.85, 0, -1.35),
+		"WheelFR": Vector3(0.85, 0, -1.35),
+		"WheelRL": Vector3(-0.85, 0, 1.35),
+		"WheelRR": Vector3(0.85, 0, 1.35),
+	}
+	for stem in stems:
+		var path := "res://scenes/vehicles/car_%s.tscn" % stem
+		var packed = load(path)
+		check(packed is PackedScene, "car_%s.tscn loads as PackedScene" % stem)
+		if not (packed is PackedScene):
+			continue
+		var inst := (packed as PackedScene).instantiate() as VehicleController
+		check(inst != null, "car_%s instantiates a VehicleController" % stem)
+		if inst == null:
+			continue
+		var rays := 0
+		for child in inst.get_children():
+			if child is RayCast3D:
+				rays += 1
+		check(rays == 4, "car_%s has exactly 4 RayCast3D wheels (got %d)" % [stem, rays])
+		for wname in wheels.keys():
+			var ray := inst.get_node_or_null(str(wname)) as RayCast3D
+			check(ray != null, "car_%s keeps %s" % [stem, str(wname)])
+			if ray != null:
+				check(ray.position == wheels[wname], "car_%s %s at the rig position" % [stem, str(wname)])
+				check(ray.target_position == Vector3(0, -0.65, 0), "car_%s %s keeps the 0.65 m ray" % [stem, str(wname)])
+		var col := inst.get_node_or_null("CollisionShape3D") as CollisionShape3D
+		check(col != null, "car_%s keeps its CollisionShape3D" % stem)
+		if col != null:
+			check(col.position == Vector3(0, 0.25, 0), "car_%s collision rides at y 0.25" % stem)
+			var box := col.shape as BoxShape3D
+			check(box != null and box.size == Vector3(1.8, 0.5, 4.2), "car_%s collision spans 1.8 x 0.5 x 4.2" % stem)
+		check(inst.get_node_or_null("Body") != null, "car_%s instances its Body" % stem)
+		var paint := inst.get_node_or_null("CarPaint")
+		check(paint != null, "car_%s has a CarPaint child" % stem)
+		if paint != null:
+			check(paint.get("body_color") is Color, "car_%s CarPaint exposes a body_color" % stem)
+		check(inst.tune != null, "car_%s has a non-null tune" % stem)
+		if inst.tune != null:
+			check(CarTune.validate(inst.tune), "car_%s tune passes CarTune.validate()" % stem)
+			check(inst.tune.resource_path == str(tunes[stem]), "car_%s uses %s" % [stem, str(tunes[stem])])
+		check(int(inst.drive_mode) == int(modes[stem]), "car_%s drive_mode matches (got %d)" % [stem, int(inst.drive_mode)])
+		root.add_child(inst)
+		inst.global_transform = Transform3D(Basis(), Vector3(0, 0.9, 0))
+		for i in 60:
+			await physics_frame
+		check(is_instance_valid(inst), "car_%s survives 60 physics frames" % stem)
+		if is_instance_valid(inst):
+			var up: Vector3 = inst.global_transform.basis.y
+			check(up.y > 0.5, "car_%s stays upright on the slab (up.y %.3f)" % [stem, up.y])
+			check(inst.global_position.y > 0.0 and inst.global_position.y < 2.0, "car_%s parks at sane height (y %.2f)" % [stem, inst.global_position.y])
+			root.remove_child(inst)
+			inst.queue_free()
+			await process_frame
+			await physics_frame
 	return true
