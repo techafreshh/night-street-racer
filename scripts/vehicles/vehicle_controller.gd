@@ -333,7 +333,7 @@ func _physics_process(delta: float) -> void:
 	engine_rpm = maxf(800.0, wheel_rps * gear_ratio * final_drive * 60.0)
 	_shift_cooldown -= delta
 	if not _reversing and _shift_cooldown <= 0.0:
-		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm and _throttle > 0.1:
+		if current_gear < gear_ratios.size() and engine_rpm > shift_up_rpm:
 			current_gear += 1
 			_shift_cooldown = 0.4
 		elif current_gear > 1 and engine_rpm < shift_down_rpm:
