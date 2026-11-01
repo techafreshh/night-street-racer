@@ -45,6 +45,8 @@ func _run_all() -> void:
 		"test_reset_clears_overpass",
 		"test_reverse_latch_needs_standstill_in_first",
 		"test_reverse_latch_fields_and_throttle_unlatch",
+		"test_reverse_rpm_signed",
+		"test_reverse_rpm_idle_positive",
 		"test_field_driven_ignores_reset_key",
 		"test_steer_turns_at_speed",
 		"test_test_ground_loads",
@@ -456,6 +458,57 @@ func test_reverse_latch_fields_and_throttle_unlatch() -> bool:
 		if car.speed_ms > 1.0:
 			break
 	check(car.speed_ms > 1.0, "throttle unlatches to forward drive (%.2f)" % car.speed_ms)
+	await _despawn_car()
+	return true
+
+func test_reverse_rpm_signed() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 1.0
+	for i in 8 * 60:
+		await physics_frame
+		if car.speed_ms < -2.0:
+			break
+	check(car.speed_ms < -1.0, "field-driven brake hold latches reverse (%.2f)" % car.speed_ms)
+	var reverse_speed: float = car.speed_ms
+	var reverse_rpm: float = car.engine_rpm
+	check(reverse_rpm < 0.0, "reverse reports negative rpm (%.0f at %.2f m/s)" % [reverse_rpm, reverse_speed])
+	check(car.current_gear == 1, "reverse rpm sign keeps 1st gear (gear %d)" % car.current_gear)
+	car.input_brake = 0.0
+	car.input_throttle = 1.0
+	var forward_rpm := 0.0
+	var forward_speed := 0.0
+	for i in 8 * 60:
+		await physics_frame
+		if car.speed_ms > 2.0:
+			forward_rpm = car.engine_rpm
+			forward_speed = car.speed_ms
+			if absf(forward_speed) >= absf(reverse_speed) - 0.5:
+				break
+	check(forward_speed > 2.0, "throttle unlatches to forward drive (%.2f)" % forward_speed)
+	check(forward_rpm > 0.0, "forward reports positive rpm (%.0f at %.2f m/s)" % [forward_rpm, forward_speed])
+	check(reverse_rpm != forward_rpm, "forward/reverse rpm differ by sign (%.0f vs %.0f)" % [reverse_rpm, forward_rpm])
+	check(signf(reverse_rpm) != signf(forward_rpm), "forward/reverse rpm signs oppose (%.0f vs %.0f)" % [reverse_rpm, forward_rpm])
+	await _despawn_car()
+	return true
+
+func test_reverse_rpm_idle_positive() -> bool:
+	var car := await _spawn_car(Vector3(0, 0.9, 0))
+	car.use_player_input = false
+	car.input_throttle = 0.0
+	car.input_brake = 0.0
+	car.input_steer = 0.0
+	car.linear_velocity = Vector3.ZERO
+	var lo := 1e9
+	var hi := -1e9
+	for i in 30:
+		await physics_frame
+		lo = minf(lo, car.engine_rpm)
+		hi = maxf(hi, car.engine_rpm)
+	check(lo > 0.0, "standstill rpm stays positive (min %.0f)" % lo)
+	check(absf(car.engine_rpm - 800.0) < 1.0, "standstill rpm rests at idle (%.0f)" % car.engine_rpm)
+	check(hi - lo < 1.0, "standstill rpm stable, no flicker (range %.2f)" % (hi - lo))
 	await _despawn_car()
 	return true
 
