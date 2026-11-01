@@ -63,6 +63,9 @@ func _run_all() -> void:
 		"test_cornering_g_envelope_0_8_to_1_4g",
 		"test_light_budget_max_8_omnis_per_mesh",
 		"test_central_roads_not_coplanar",
+		"test_city_kit_glb_present",
+		"test_city_kit_credits",
+		"test_district_night_uses_kit",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -1080,4 +1083,100 @@ func test_cornering_g_envelope_0_8_to_1_4g() -> bool:
 	check(tune.tire_grip_rear >= 0.8 and tune.tire_grip_rear <= 1.4, "rear axle grip in 0.8-1.4 g (%.2f)" % tune.tire_grip_rear)
 	check(absf(cornering_g - mean_grip) < 0.05, "envelope matches mean grip (%.3f g vs %.3f)" % [cornering_g, mean_grip])
 	check(cornering_g >= 0.8 and cornering_g <= 1.4, "cornering g envelope 0.8-1.4 g (%.3f g)" % cornering_g)
+	return true
+
+func test_city_kit_glb_present() -> bool:
+	var dir := DirAccess.open("res://assets/city")
+	check(dir != null, "assets/city directory opens")
+	if dir == null:
+		return true
+	var glbs: Array[String] = []
+	dir.list_dir_begin()
+	var entry := dir.get_next()
+	while entry != "":
+		if not dir.current_is_dir() and entry.ends_with(".glb"):
+			glbs.append(entry)
+		entry = dir.get_next()
+	dir.list_dir_end()
+	check(glbs.size() >= 5, "assets/city holds >= 5 kit .glb files (got %d)" % glbs.size())
+	for g in glbs:
+		var packed = load("res://assets/city/%s" % g)
+		check(packed is PackedScene, "kit %s loads as PackedScene" % g)
+		if packed is PackedScene:
+			var inst: Node = (packed as PackedScene).instantiate()
+			check(inst != null, "kit %s instantiates" % g)
+			if inst != null:
+				inst.free()
+	return true
+
+func test_city_kit_credits() -> bool:
+	check(FileAccess.file_exists("res://docs/CREDITS"), "docs/CREDITS exists")
+	var text := ""
+	if FileAccess.file_exists("res://docs/CREDITS"):
+		text = FileAccess.get_file_as_string("res://docs/CREDITS")
+	check(text.contains("Kenney"), "CREDITS names Kenney")
+	check(text.contains("Poly Haven"), "CREDITS names Poly Haven")
+	check(text.contains("https://kenney.nl/assets/category:3D"), "CREDITS pins the Kenney 3D URL")
+	check(text.contains("https://polyhaven.com/hdris"), "CREDITS pins the Poly Haven HDRIs URL")
+	check(text.contains("CC0"), "CREDITS records the CC0 license")
+	return true
+
+func test_district_night_uses_kit() -> bool:
+	var packed = load("res://scenes/city/district_night.tscn")
+	check(packed is PackedScene, "district_night.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "district night instantiates for the kit check")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	await process_frame
+	var names: Array[String] = []
+	for child in instance.get_children():
+		names.append(str(child.name))
+	var has_tower := false
+	var has_shop := false
+	var has_lamp := false
+	var has_neon := false
+	var has_barrier := false
+	var has_prop := false
+	for n in names:
+		if n.begins_with("Kit_Tower"):
+			has_tower = true
+		if n.begins_with("Kit_Shop"):
+			has_shop = true
+		if n.begins_with("Kit_Lamp"):
+			has_lamp = true
+		if n.begins_with("Kit_Neon"):
+			has_neon = true
+		if n.begins_with("Kit_Barrier"):
+			has_barrier = true
+		if n.begins_with("Kit_Prop"):
+			has_prop = true
+	check(has_tower, "night district instances tower kit buildings")
+	check(has_shop, "night district instances shop kit buildings")
+	check(has_lamp, "night district instances streetlamp kits")
+	check(has_neon, "night district instances neon-sign kits")
+	check(has_barrier, "night district instances barrier kits along the route edges")
+	check(has_prop, "night district instances street-prop kits")
+	for wall_name in ["WallN", "WallS", "WallE", "WallW"]:
+		var wall := instance.get_node_or_null(wall_name) as StaticBody3D
+		check(wall != null, "%s edge wall exists" % wall_name)
+		if wall == null:
+			continue
+		check(wall.collision_layer == 1, "%s keeps collision_layer 1" % wall_name)
+		check(wall.get_node_or_null("CollisionShape3D") != null, "%s keeps its CollisionShape3D" % wall_name)
+		var stripe := wall.get_node_or_null("BarrierStripe") as MeshInstance3D
+		check(stripe != null, "%s has a visible BarrierStripe mesh child" % wall_name)
+		if stripe != null:
+			check(stripe.mesh != null, "%s BarrierStripe mesh is set" % wall_name)
+	var envs := instance.find_children("*", "WorldEnvironment", true, false)
+	check(envs.size() == 1, "kit pass keeps exactly one WorldEnvironment (%d)" % envs.size())
+	var suns := instance.find_children("*", "DirectionalLight3D", true, false)
+	check(suns.size() == 1, "kit pass keeps exactly one DirectionalLight3D (%d)" % suns.size())
+	var omnis := instance.find_children("*", "OmniLight3D", true, false)
+	check(omnis.size() <= 8, "kit pass adds no lights: omnis stay in budget (%d)" % omnis.size())
+	root.remove_child(instance)
+	instance.free()
 	return true

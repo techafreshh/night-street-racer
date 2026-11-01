@@ -1,7 +1,13 @@
-[gd_scene load_steps=20 format=3]
+[gd_scene load_steps=29 format=3]
 
 [ext_resource type="Script" path="res://scripts/city/district_night.gd" id="1"]
 [ext_resource type="Texture2D" path="res://assets/city/night_sky.hdr" id="2"]
+[ext_resource type="PackedScene" path="res://assets/city/building_tower.glb" id="3"]
+[ext_resource type="PackedScene" path="res://assets/city/building_shop.glb" id="4"]
+[ext_resource type="PackedScene" path="res://assets/city/streetlamp.glb" id="5"]
+[ext_resource type="PackedScene" path="res://assets/city/neon_sign.glb" id="6"]
+[ext_resource type="PackedScene" path="res://assets/city/barrier.glb" id="7"]
+[ext_resource type="PackedScene" path="res://assets/city/street_prop.glb" id="8"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_1"]
 panorama = ExtResource("2")
@@ -75,6 +81,20 @@ emission_energy_multiplier = 4.0
 [sub_resource type="BoxMesh" id="BoxMesh_neon"]
 material = SubResource("StandardMaterial3D_neon")
 size = Vector3(6, 3, 0.6)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_barrier"]
+albedo_color = Color(0.6, 0.15, 0.03, 1)
+emission_enabled = true
+emission = Color(1, 0.4, 0.08, 1)
+emission_energy_multiplier = 3.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_barrier_ns"]
+material = SubResource("StandardMaterial3D_barrier")
+size = Vector3(284, 1.2, 0.6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_barrier_ew"]
+material = SubResource("StandardMaterial3D_barrier")
+size = Vector3(0.6, 1.2, 284)
 
 [node name="DistrictNight" type="Node3D"]
 script = ExtResource("1")
@@ -438,6 +458,10 @@ collision_mask = 0
 [node name="CollisionShape3D" type="CollisionShape3D" parent="WallN"]
 shape = SubResource("BoxShape3D_wall_ns")
 
+[node name="BarrierStripe" type="MeshInstance3D" parent="WallN"]
+position = Vector3(0, -2, 0)
+mesh = SubResource("BoxMesh_barrier_ns")
+
 [node name="WallS" type="StaticBody3D" parent="."]
 position = Vector3(0, 5, 141)
 collision_layer = 1
@@ -445,6 +469,10 @@ collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="WallS"]
 shape = SubResource("BoxShape3D_wall_ns")
+
+[node name="BarrierStripe" type="MeshInstance3D" parent="WallS"]
+position = Vector3(0, -2, 0)
+mesh = SubResource("BoxMesh_barrier_ns")
 
 [node name="WallE" type="StaticBody3D" parent="."]
 position = Vector3(141, 5, 0)
@@ -454,6 +482,10 @@ collision_mask = 0
 [node name="CollisionShape3D" type="CollisionShape3D" parent="WallE"]
 shape = SubResource("BoxShape3D_wall_ew")
 
+[node name="BarrierStripe" type="MeshInstance3D" parent="WallE"]
+position = Vector3(0, -2, 0)
+mesh = SubResource("BoxMesh_barrier_ew")
+
 [node name="WallW" type="StaticBody3D" parent="."]
 position = Vector3(-141, 5, 0)
 collision_layer = 1
@@ -461,6 +493,10 @@ collision_mask = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="WallW"]
 shape = SubResource("BoxShape3D_wall_ew")
+
+[node name="BarrierStripe" type="MeshInstance3D" parent="WallW"]
+position = Vector3(0, -2, 0)
+mesh = SubResource("BoxMesh_barrier_ew")
 
 [node name="Window_0_0" type="MeshInstance3D" parent="."]
 position = Vector3(-102, 4.3, -102)
@@ -545,6 +581,188 @@ mesh = SubResource("BoxMesh_neon")
 position = Vector3(-10, 5, -10)
 rotation = Vector3(0, 0.785, 0)
 mesh = SubResource("BoxMesh_neon")
+
+[node name="Kit_Tower_0_0" parent="." instance=ExtResource("3")]
+position = Vector3(-102, 0.3, -102)
+
+[node name="Kit_Shop_0_1" parent="." instance=ExtResource("4")]
+position = Vector3(-102, 0.3, -34)
+
+[node name="Kit_Tower_0_2" parent="." instance=ExtResource("3")]
+position = Vector3(-102, 0.3, 34)
+
+[node name="Kit_Shop_0_3" parent="." instance=ExtResource("4")]
+position = Vector3(-102, 0.3, 102)
+
+[node name="Kit_Shop_1_0" parent="." instance=ExtResource("4")]
+position = Vector3(-34, 0.3, -102)
+
+[node name="Kit_Tower_1_1" parent="." instance=ExtResource("3")]
+position = Vector3(-34, 0.3, -34)
+
+[node name="Kit_Shop_1_2" parent="." instance=ExtResource("4")]
+position = Vector3(-34, 0.3, 34)
+
+[node name="Kit_Tower_1_3" parent="." instance=ExtResource("3")]
+position = Vector3(-34, 0.3, 102)
+
+[node name="Kit_Tower_2_0" parent="." instance=ExtResource("3")]
+position = Vector3(34, 0.3, -102)
+
+[node name="Kit_Shop_2_1" parent="." instance=ExtResource("4")]
+position = Vector3(34, 0.3, -34)
+
+[node name="Kit_Tower_2_2" parent="." instance=ExtResource("3")]
+position = Vector3(34, 0.3, 34)
+
+[node name="Kit_Shop_2_3" parent="." instance=ExtResource("4")]
+position = Vector3(34, 0.3, 102)
+
+[node name="Kit_Shop_3_0" parent="." instance=ExtResource("4")]
+position = Vector3(102, 0.3, -102)
+
+[node name="Kit_Tower_3_1" parent="." instance=ExtResource("3")]
+position = Vector3(102, 0.3, -34)
+
+[node name="Kit_Shop_3_2" parent="." instance=ExtResource("4")]
+position = Vector3(102, 0.3, 34)
+
+[node name="Kit_Tower_3_3" parent="." instance=ExtResource("3")]
+position = Vector3(102, 0.3, 102)
+
+[node name="Kit_Lamp_0" parent="." instance=ExtResource("5")]
+position = Vector3(-6, 0.3, -102)
+
+[node name="Kit_Lamp_1" parent="." instance=ExtResource("5")]
+position = Vector3(6, 0.3, -102)
+
+[node name="Kit_Lamp_2" parent="." instance=ExtResource("5")]
+position = Vector3(-6, 0.3, -34)
+
+[node name="Kit_Lamp_3" parent="." instance=ExtResource("5")]
+position = Vector3(6, 0.3, -34)
+
+[node name="Kit_Lamp_4" parent="." instance=ExtResource("5")]
+position = Vector3(-6, 0.3, 34)
+
+[node name="Kit_Lamp_5" parent="." instance=ExtResource("5")]
+position = Vector3(6, 0.3, 34)
+
+[node name="Kit_Lamp_6" parent="." instance=ExtResource("5")]
+position = Vector3(-6, 0.3, 102)
+
+[node name="Kit_Lamp_7" parent="." instance=ExtResource("5")]
+position = Vector3(6, 0.3, 102)
+
+[node name="Kit_Neon_0" parent="." instance=ExtResource("6")]
+position = Vector3(14, 0.3, 14)
+rotation = Vector3(0, 0.785, 0)
+
+[node name="Kit_Neon_1" parent="." instance=ExtResource("6")]
+position = Vector3(-14, 0.3, 14)
+rotation = Vector3(0, -0.785, 0)
+
+[node name="Kit_Neon_2" parent="." instance=ExtResource("6")]
+position = Vector3(14, 0.3, -14)
+rotation = Vector3(0, -0.785, 0)
+
+[node name="Kit_Neon_3" parent="." instance=ExtResource("6")]
+position = Vector3(-14, 0.3, -14)
+rotation = Vector3(0, 0.785, 0)
+
+[node name="Kit_Barrier_N0" parent="." instance=ExtResource("7")]
+position = Vector3(-100, 0, -134)
+
+[node name="Kit_Barrier_N1" parent="." instance=ExtResource("7")]
+position = Vector3(-50, 0, -134)
+
+[node name="Kit_Barrier_N2" parent="." instance=ExtResource("7")]
+position = Vector3(0, 0, -134)
+
+[node name="Kit_Barrier_N3" parent="." instance=ExtResource("7")]
+position = Vector3(50, 0, -134)
+
+[node name="Kit_Barrier_N4" parent="." instance=ExtResource("7")]
+position = Vector3(100, 0, -134)
+
+[node name="Kit_Barrier_S0" parent="." instance=ExtResource("7")]
+position = Vector3(-100, 0, 134)
+
+[node name="Kit_Barrier_S1" parent="." instance=ExtResource("7")]
+position = Vector3(-50, 0, 134)
+
+[node name="Kit_Barrier_S2" parent="." instance=ExtResource("7")]
+position = Vector3(0, 0, 134)
+
+[node name="Kit_Barrier_S3" parent="." instance=ExtResource("7")]
+position = Vector3(50, 0, 134)
+
+[node name="Kit_Barrier_S4" parent="." instance=ExtResource("7")]
+position = Vector3(100, 0, 134)
+
+[node name="Kit_Barrier_E0" parent="." instance=ExtResource("7")]
+position = Vector3(134, 0, -100)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_E1" parent="." instance=ExtResource("7")]
+position = Vector3(134, 0, -50)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_E2" parent="." instance=ExtResource("7")]
+position = Vector3(134, 0, 0)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_E3" parent="." instance=ExtResource("7")]
+position = Vector3(134, 0, 50)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_E4" parent="." instance=ExtResource("7")]
+position = Vector3(134, 0, 100)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_W0" parent="." instance=ExtResource("7")]
+position = Vector3(-134, 0, -100)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_W1" parent="." instance=ExtResource("7")]
+position = Vector3(-134, 0, -50)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_W2" parent="." instance=ExtResource("7")]
+position = Vector3(-134, 0, 0)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_W3" parent="." instance=ExtResource("7")]
+position = Vector3(-134, 0, 50)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Barrier_W4" parent="." instance=ExtResource("7")]
+position = Vector3(-134, 0, 100)
+rotation = Vector3(0, 1.5708, 0)
+
+[node name="Kit_Prop_0" parent="." instance=ExtResource("8")]
+position = Vector3(-82, 0.3, -82)
+
+[node name="Kit_Prop_1" parent="." instance=ExtResource("8")]
+position = Vector3(-82, 0.3, -14)
+
+[node name="Kit_Prop_2" parent="." instance=ExtResource("8")]
+position = Vector3(-82, 0.3, 54)
+
+[node name="Kit_Prop_3" parent="." instance=ExtResource("8")]
+position = Vector3(-14, 0.3, -82)
+
+[node name="Kit_Prop_4" parent="." instance=ExtResource("8")]
+position = Vector3(-14, 0.3, 54)
+
+[node name="Kit_Prop_5" parent="." instance=ExtResource("8")]
+position = Vector3(54, 0.3, -82)
+
+[node name="Kit_Prop_6" parent="." instance=ExtResource("8")]
+position = Vector3(54, 0.3, -14)
+
+[node name="Kit_Prop_7" parent="." instance=ExtResource("8")]
+position = Vector3(54, 0.3, 54)
 
 [node name="OmniCenter" type="OmniLight3D" parent="."]
 position = Vector3(0, 6, 0)
