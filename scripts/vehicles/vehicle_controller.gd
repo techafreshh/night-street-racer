@@ -48,6 +48,9 @@ enum DriveMode { FWD, RWD, AWD }
 
 ## Swappable input source: sample InputMap when true, fields when false.
 @export var use_player_input := true
+## Driving assists (traction/stability), default ON; synced each tick from
+## the Assists child node, which in turn honors the Settings.assists hook.
+@export var assists_enabled := true
 var input_throttle := 0.0
 var input_brake := 0.0
 var input_steer := 0.0
@@ -167,7 +170,8 @@ func _physics_process(delta: float) -> void:
 	speed_ms = forward_speed
 
 	# Speed-sensitive front steering, smoothed toward target.
-	var steer_target := _steer * max_steer_angle / (1.0 + absf(forward_speed) * steer_speed_falloff)
+	var assisted_steer := VehicleAssists.correct_steer(_steer, forward_speed, assists_enabled)
+	var steer_target := assisted_steer * max_steer_angle / (1.0 + absf(forward_speed) * steer_speed_falloff)
 	_current_steer = move_toward(_current_steer, steer_target, 5.0 * delta)
 
 	# Minimal reverse latch: hold brake at a near-standstill in 1st to
@@ -236,7 +240,8 @@ func _physics_process(delta: float) -> void:
 				fx += -f_speed * _brake * brake_force * 2.0
 
 		var lat_factor := handbrake_grip_factor if (_handbrake and rear) else 1.0
-		var fy := compute_lateral_force(slip, susp, tire_grip, cornering_stiffness, surface_grip, lat_factor) * ramp
+		var fy_raw := compute_lateral_force(slip, susp, tire_grip, cornering_stiffness, surface_grip, lat_factor) * ramp
+		var fy := VehicleAssists.damp_slip(fy_raw, assists_enabled)
 		var max_f := tire_grip * susp * surface_grip
 		var capped := clamp_to_friction_circle(fx, fy, max_f, lat_factor)
 		apply_force(up * susp + w_fwd * capped.x + w_right * capped.y, r)

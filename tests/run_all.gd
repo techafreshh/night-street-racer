@@ -37,6 +37,7 @@ func _run_all() -> void:
 		"test_accel_reaches_25ms_in_8s",
 		"test_brake_20ms_within_30m",
 		"test_handbrake_reduces_rear_grip",
+		"test_assists_reduce_slip_when_on",
 		"test_suspension_settles_after_drop",
 		"test_reset_after_flip",
 		"test_steer_turns_at_speed",
@@ -250,6 +251,37 @@ func _steer_yaw_run(handbrake: bool) -> float:
 		prev = yaw
 	_release_inputs()
 	return total
+
+func test_assists_reduce_slip_when_on() -> bool:
+	var steer := 0.8
+	var speed := 20.0
+	var raw_slip := 0.25
+	var steer_off := VehicleAssists.correct_steer(steer, speed, false)
+	check(steer_off == steer, "assists off leaves steer unchanged (%.4f)" % steer_off)
+	var steer_on := VehicleAssists.correct_steer(steer, speed, true)
+	check(absf(steer_on) < absf(steer_off), "assists on reduces steer response (on %.4f vs off %.4f)" % [steer_on, steer_off])
+	check(signf(steer_on) == signf(steer_off), "assists preserve steer direction")
+	var slip_off := VehicleAssists.damp_slip(raw_slip, false)
+	check(slip_off == raw_slip, "assists off leaves slip unchanged (%.4f)" % slip_off)
+	var slip_on := VehicleAssists.damp_slip(raw_slip, true)
+	check(absf(slip_on) < absf(slip_off), "assists on reduces slip angle (on %.4f vs off %.4f)" % [slip_on, slip_off])
+	var assists_node := VehicleAssists.new()
+	check(assists_node.assists_enabled == true, "assists default ON")
+	assists_node.free()
+	var packed = load("res://scenes/vehicles/vehicle_base.tscn") as PackedScene
+	check(packed != null, "vehicle scene loads for assists/camera wiring check")
+	if packed != null:
+		var inst := packed.instantiate() as VehicleController
+		check(inst != null, "vehicle instantiates for wiring check")
+		if inst != null:
+			check(inst.assists_enabled == true, "controller assists default ON")
+			var cam := inst.get_node_or_null("ChaseCamera")
+			check(cam != null and cam is Camera3D, "ChaseCamera child present on vehicle")
+			if cam is Camera3D:
+				check((cam as Camera3D).current == true, "ChaseCamera is current")
+			check(inst.get_node_or_null("Assists") != null, "Assists child present on vehicle")
+			inst.free()
+	return true
 
 func test_suspension_settles_after_drop() -> bool:
 	var car := await _spawn_car(Vector3(0, 1.2, 0))
