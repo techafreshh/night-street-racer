@@ -17,6 +17,9 @@ func check(condition: bool, label: String) -> void:
 		push_error("FAIL detail: %s" % label)
 
 func _make_ground() -> void:
+	if is_instance_valid(ground):
+		ground.free()
+		ground = null
 	ground = StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
