@@ -42,6 +42,12 @@ func get_test_names() -> Array[String]:
 		"test_garage_esc_goes_back",
 		"race_typed_selection_reads",
 		"results_typed_handoff_read",
+		"drift_event_validates_and_finishes_like_sprint",
+		"rivals_spawn_per_opponents_race_only",
+		"tt_toggle_suppresses_rivals",
+		"mode_button_toggles_time_trial",
+		"six_event_grid_builds",
+		"pause_settings_route",
 	]
 	return names
 
@@ -98,8 +104,10 @@ func test_checkpoints_validate_in_order() -> bool:
 		ctx.check(ev.route_id == stem, "%s route_id matches stem (got %s)" % [stem, ev.route_id])
 		ctx.check(RaceEvent.validate(ev), "%s passes RaceEvent.validate()" % stem)
 		ctx.check(ev.checkpoint_radius >= RaceEvent.CHECKPOINT_RADIUS_MIN and ev.checkpoint_radius <= RaceEvent.CHECKPOINT_RADIUS_MAX, "%s radius in range (%.1f)" % [stem, ev.checkpoint_radius])
-		if RaceEvent.is_sprint(ev):
-			ctx.check(ev.laps == RaceEvent.SPRINT_LAPS, "%s sprint encodes 1 lap (got %d)" % [stem, ev.laps])
+		ctx.check(RaceEvent.is_drift(ev) == (stem == "drift_park"), "%s drift typing matches the drift_park slot" % stem)
+		if RaceEvent.is_sprint(ev) or RaceEvent.is_drift(ev):
+			var kind := "drift" if RaceEvent.is_drift(ev) else "sprint"
+			ctx.check(ev.laps == RaceEvent.SPRINT_LAPS, "%s %s encodes 1 lap (got %d)" % [stem, kind, ev.laps])
 		else:
 			ctx.check(RaceEvent.is_circuit(ev), "%s non-sprint is a circuit" % stem)
 			ctx.check(ev.laps >= RaceEvent.CIRCUIT_LAPS_MIN, "%s circuit encodes 2+ laps (got %d)" % [stem, ev.laps])
@@ -118,8 +126,9 @@ func test_checkpoints_validate_in_order() -> bool:
 		if RaceEvent.is_circuit(ev):
 			ctx.check(RaceEvent.next_index(last, ev) == 0, "%s circuit wraps to gate 0" % stem)
 		else:
-			ctx.check(RaceEvent.next_index(last, ev) == -1, "%s sprint finishes (-1)" % stem)
-			ctx.check(not RaceEvent.completes_lap(last, count - 2, ev), "%s sprint finish is not a lap" % stem)
+			var kind2 := "drift" if RaceEvent.is_drift(ev) else "sprint"
+			ctx.check(RaceEvent.next_index(last, ev) == -1, "%s %s finishes (-1)" % [stem, kind2])
+			ctx.check(not RaceEvent.completes_lap(last, count - 2, ev), "%s %s finish is not a lap" % [stem, kind2])
 	var gate_packed = load("res://scenes/races/checkpoint.tscn")
 	ctx.check(gate_packed is PackedScene, "checkpoint.tscn loads as PackedScene")
 	if gate_packed is PackedScene:
@@ -1612,3 +1621,250 @@ func gs_has_typed_results_reader() -> bool:
 	var ok: bool = probe.has_method("get_last_result")
 	probe.free()
 	return ok
+
+func drift_event_validates_and_finishes_like_sprint() -> bool:
+	var ev := load("res://assets/events/drift_park.tres") as RaceEvent
+	ctx.check(ev != null, "drift_park loads as RaceEvent")
+	if ev == null:
+		return true
+	ctx.check(RaceEvent.validate(ev), "drift_park passes RaceEvent.validate()")
+	ctx.check(RaceEvent.is_drift(ev), "drift_park reads as a drift event")
+	ctx.check(not RaceEvent.is_circuit(ev), "drift_park is not a circuit")
+	ctx.check(not RaceEvent.is_sprint(ev), "drift_park is not a sprint")
+	ctx.check(ev.laps == RaceEvent.SPRINT_LAPS, "drift encodes 1 lap (got %d)" % ev.laps)
+	ctx.check(ev.opponents >= RaceEvent.OPPONENTS_MIN and ev.opponents <= RaceEvent.OPPONENTS_MAX, "drift opponents in range (got %d)" % ev.opponents)
+	var count := ev.checkpoints.size()
+	ctx.check(count >= RaceEvent.CHECKPOINT_COUNT_MIN, "drift has >= 4 gates (got %d)" % count)
+	var last := -1
+	for i in count:
+		var nxt: int = RaceEvent.next_index(last, ev)
+		ctx.check(nxt == i, "drift gate %d is next after %d" % [i, last])
+		ctx.check(RaceEvent.is_correct_hit(i, last, ev), "drift gate %d validates in order" % i)
+		var prev := last
+		last = i
+		if i == count - 1:
+			ctx.check(not RaceEvent.completes_lap(i, prev, ev), "drift final gate is not a lap")
+	ctx.check(RaceEvent.next_index(last, ev) == -1, "drift finishes at the final gate (-1)")
+	ctx.check(RaceEvent.is_wrong_way(2, 0, ev), "drift skip from gate 0 to gate 2 is wrong-way")
+	ctx.check(not RaceEvent.is_wrong_way(1, 0, ev), "drift expected gate 1 is not wrong-way")
+	return true
+
+func _race_field_count(instance: Node) -> int:
+	var total := 0
+	for child in instance.get_children():
+		if child is VehicleController:
+			total += 1
+	return total
+
+func rivals_spawn_per_opponents_race_only() -> bool:
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	ctx.check(gs != null, "GameState singleton is reachable for the rivals probe")
+	if gs == null:
+		return true
+	ctx.check(gs.has_method("select_event") and gs.has_method("select_mode"), "GameState exposes the race selectors")
+	var prev_event := StringName(gs.call("get_current_event"))
+	gs.call("select_event", "harbor_sprint")
+	gs.call("select_mode", "race")
+	var expect := 3
+	var ev := load("res://assets/events/harbor_sprint.tres") as RaceEvent
+	if ev != null:
+		expect = ev.opponents
+	var packed = load("res://scenes/races/race_harbor_sprint.tscn")
+	ctx.check(packed is PackedScene, "race_harbor_sprint.tscn loads for the rivals probe")
+	if not (packed is PackedScene):
+		gs.call("select_event", String(prev_event))
+		gs.call("select_mode", "race")
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(_race_field_count(instance) == 1 + expect, "race mode spawns player + %d rivals (got %d)" % [expect, _race_field_count(instance)])
+	var named := 0
+	for child in instance.get_children():
+		if child is VehicleController and String((child as Node).name) != "":
+			named += 1
+	ctx.check(named == 1 + expect, "every field car is a direct race child (got %d)" % named)
+	ctx.check(instance.get_node_or_null("Traffic") != null, "race mode composes a Traffic node")
+	var manager := instance.get_node_or_null("EventManager")
+	ctx.check(manager != null, "rivals probe has an EventManager")
+	if manager != null:
+		for _i in 500:
+			if int(manager.get("state")) == 1:
+				break
+			await ctx.tree.physics_frame
+		ctx.check(int(manager.get("state")) == 1, "race-mode field reaches RACING with rivals aboard")
+		for _i in 60:
+			await ctx.tree.physics_frame
+		for _i in 10:
+			await ctx.tree.process_frame
+		var hud := instance.get_node_or_null("HUD")
+		ctx.check(hud != null, "rivals probe has a HUD")
+		if hud != null:
+			var timer := hud.get_node_or_null("TimerLabel") as Label
+			ctx.check(timer != null and timer.text != "00:00.000", "HUD clock runs while RACING (got %s)" % (timer.text if timer != null else "?"))
+			var pos := hud.get_node_or_null("PositionLabel") as Label
+			ctx.check(pos != null and pos.text.contains("P") and pos.text.contains("/%d" % (1 + expect)), "HUD position counts the full field (got %s)" % (pos.text if pos != null else "?"))
+			var dots := hud.get_node_or_null("Minimap/SubViewport/CheckpointLayer")
+			ctx.check(dots != null and dots.get_child_count() >= 4, "HUD minimap holds checkpoint dots (got %d)" % (dots.get_child_count() if dots != null else -1))
+	ctx.tree.root.remove_child(instance)
+	instance.free()
+	await ctx.tree.process_frame
+	await ctx.tree.physics_frame
+	gs.call("select_event", String(prev_event))
+	gs.call("select_mode", "race")
+	if gs.has_method("flush"):
+		gs.call("flush")
+	return true
+
+func tt_toggle_suppresses_rivals() -> bool:
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	ctx.check(gs != null, "GameState singleton is reachable for the TT suppression probe")
+	if gs == null:
+		return true
+	var prev_event := StringName(gs.call("get_current_event"))
+	gs.call("select_event", "harbor_sprint")
+	gs.call("select_mode", "time_trial")
+	ctx.check(gs.call("is_time_trial_mode") == true, "time_trial selection reads back through GameState")
+	var packed = load("res://scenes/races/race_harbor_sprint.tscn")
+	ctx.check(packed is PackedScene, "race_harbor_sprint.tscn loads for the TT probe")
+	if not (packed is PackedScene):
+		gs.call("select_event", String(prev_event))
+		gs.call("select_mode", "race")
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(_race_field_count(instance) == 1, "time-trial spawns the solo player only (got %d)" % _race_field_count(instance))
+	ctx.check(instance.get_node_or_null("Traffic") == null, "time-trial composes no Traffic node")
+	var manager := instance.get_node_or_null("EventManager")
+	if manager != null:
+		for _i in 500:
+			if int(manager.get("state")) == 1:
+				break
+			await ctx.tree.physics_frame
+		ctx.check(int(manager.get("state")) == 1, "solo time-trial still reaches RACING")
+	ctx.tree.root.remove_child(instance)
+	instance.free()
+	await ctx.tree.process_frame
+	await ctx.tree.physics_frame
+	gs.call("select_event", String(prev_event))
+	gs.call("select_mode", "race")
+	if gs.has_method("flush"):
+		gs.call("flush")
+	return true
+
+func mode_button_toggles_time_trial() -> bool:
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	ctx.check(gs != null, "GameState singleton is reachable for the ModeButton probe")
+	if gs == null:
+		return true
+	var packed = load("res://scenes/ui/event_select.tscn")
+	ctx.check(packed is PackedScene, "event_select.tscn loads for the ModeButton probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	for _i in 60:
+		var grid := instance.find_child("EventGrid", true, false) as GridContainer
+		if grid != null and grid.get_child_count() >= 6:
+			break
+		await ctx.tree.process_frame
+	var mode := instance.find_child("ModeButton", true, false) as BaseButton
+	ctx.check(mode != null, "event select has a ModeButton")
+	if mode == null:
+		ctx.tree.root.remove_child(instance)
+		instance.free()
+		gs.call("select_mode", "race")
+		return true
+	ctx.check(gs.call("is_time_trial_mode") == false, "entering event select defaults to race mode")
+	ctx.check((mode as Button).text.contains("Race"), "ModeButton names Race by default (got %s)" % (mode as Button).text)
+	mode.pressed.emit()
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(gs.call("is_time_trial_mode") == true, "ModeButton press selects time-trial")
+	ctx.check((mode as Button).text.contains("Time Trial"), "ModeButton names Time Trial when active (got %s)" % (mode as Button).text)
+	var info := instance.find_child("InfoLabel", true, false) as Label
+	ctx.check(info != null and info.text.contains("Time Trial"), "InfoLabel reflects time-trial (got %s)" % (info.text if info != null else "?"))
+	mode.pressed.emit()
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(gs.call("is_time_trial_mode") == false, "second ModeButton press returns to race")
+	ctx.check((mode as Button).text.contains("Race"), "ModeButton names Race again (got %s)" % (mode as Button).text)
+	ctx.tree.root.remove_child(instance)
+	instance.free()
+	await ctx.tree.process_frame
+	gs.call("select_mode", "race")
+	return true
+
+func six_event_grid_builds() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	ctx.check(packed is PackedScene, "event_select.tscn loads for the six-grid probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	var grid: GridContainer = null
+	for _i in 60:
+		grid = instance.find_child("EventGrid", true, false) as GridContainer
+		if grid != null and grid.get_child_count() >= 6:
+			break
+		await ctx.tree.process_frame
+	ctx.check(grid != null, "six-grid probe has an EventGrid")
+	if grid == null:
+		ctx.tree.root.remove_child(instance)
+		instance.free()
+		return true
+	ctx.check(grid.get_child_count() == 6, "event grid builds 6 buttons (got %d)" % grid.get_child_count())
+	var drift_btn := instance.find_child("Event_drift_park", true, false) as Button
+	ctx.check(drift_btn != null, "grid has an Event_drift_park button")
+	if drift_btn != null:
+		ctx.check(drift_btn.text.contains("drift_park"), "drift button names drift_park")
+		ctx.check(drift_btn.text.contains("DRIFT"), "drift button carries the DRIFT tag (got %s)" % drift_btn.text)
+	ctx.tree.root.remove_child(instance)
+	instance.free()
+	await ctx.tree.process_frame
+	return true
+
+func pause_settings_route() -> bool:
+	var packed = load("res://scenes/ui/pause_menu.tscn")
+	ctx.check(packed is PackedScene, "pause_menu.tscn loads for the settings-route probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.check(instance != null, "pause menu instantiates for the settings-route probe")
+	if instance == null:
+		return true
+	var settings_btn := instance.find_child("SettingsButton", true, false) as BaseButton
+	ctx.check(settings_btn != null, "pause menu has a SettingsButton")
+	if settings_btn == null:
+		instance.free()
+		return true
+	ctx.tree.root.add_child(instance)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var tree := instance.get_tree()
+	ctx.check(tree != null, "settings-route probe is in the tree")
+	instance.call("_pause")
+	await ctx.tree.process_frame
+	ctx.check(tree.paused == true, "probe pauses before routing")
+	settings_btn.pressed.emit()
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(tree.paused == false, "settings route unpauses the tree")
+	var swapped := ctx.tree.current_scene
+	ctx.check(swapped != null and swapped != instance, "settings route leaves PauseMenu")
+	ctx.check(swapped != null and (swapped.find_child("MasterSlider", true, false) != null or swapped.name == "Settings"), "settings route lands on the settings screen")
+	if swapped != null and swapped != instance and is_instance_valid(swapped):
+		if swapped.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(swapped)
+		swapped.free()
+		await ctx.tree.process_frame
+	if is_instance_valid(instance):
+		if instance.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(instance)
+		instance.free()
+		await ctx.tree.process_frame
+	tree.paused = false
+	return true
