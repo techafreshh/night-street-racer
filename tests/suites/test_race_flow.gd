@@ -18,6 +18,7 @@ func get_test_names() -> Array[String]:
 		"four_tunes_distinct",
 		"countdown_sequence_3s",
 		"lap_counting_increments",
+		"reset_keeps_lap_valid",
 		"positions_sort_by_progress",
 		"results_hold_all_finishers",
 		"test_results_scene_loads",
@@ -363,6 +364,66 @@ func lap_counting_increments() -> bool:
 	ctx.check(mgr.state == saved_state, "car reset keeps race state valid")
 	ctx.check(mgr.current_lap == saved_lap, "car reset keeps lap count valid (%d)" % mgr.current_lap)
 	ctx.check(absf(mgr.race_time - saved_time) < 0.001, "car reset keeps race clock valid (%.3f)" % mgr.race_time)
+	await ctx._despawn_car()
+	mgr.queue_free()
+	await ctx.tree.process_frame
+	await ctx.tree.physics_frame
+	return true
+
+func reset_keeps_lap_valid() -> bool:
+	var ev := load("res://assets/events/downtown_gp.tres") as RaceEvent
+	ctx.check(ev != null, "downtown_gp loads for the reset-keeps-lap check")
+	if ev == null:
+		return true
+	ctx.check(RaceEvent.validate(ev), "downtown_gp validates for the reset-keeps-lap check")
+	var count := ev.checkpoints.size()
+	ctx.check(count >= 4, "circuit has >= 4 gates (got %d)" % count)
+	var mgr := RaceEventManager.new()
+	ctx.check(mgr != null, "RaceEventManager instantiates for the reset-keeps-lap check")
+	if mgr == null:
+		return true
+	mgr.event = ev
+	mgr.autostart = false
+	ctx.tree.root.add_child(mgr)
+	await ctx.tree.process_frame
+	mgr.start_race()
+	for i in 300:
+		await ctx.tree.physics_frame
+		if mgr.state == RaceEventManager.State.RACING:
+			break
+	ctx.check(mgr.state == RaceEventManager.State.RACING, "manager reaches RACING before the reset lap")
+	var last := -1
+	for i in count:
+		var nxt: int = RaceEvent.next_index(last, ev)
+		var ok := mgr.register_hit(nxt)
+		ctx.check(ok, "reset probe lap gate %d validates" % nxt)
+		last = nxt
+	ctx.check(mgr.current_lap == 1, "reset probe completes lap 1 (got %d)" % mgr.current_lap)
+	ctx.check(mgr.state == RaceEventManager.State.RACING, "mid-race stays RACING after lap 1")
+	var car := await ctx._spawn_car(Vector3(0, 0.9, 0))
+	var flip := Basis(Vector3(1, 0, 0), PI)
+	var pos: Vector3 = car.global_position
+	car.global_transform = Transform3D(flip, Vector3(pos.x, 0.7, pos.z))
+	car.linear_velocity = Vector3.ZERO
+	car.angular_velocity = Vector3.ZERO
+	await ctx.tree.physics_frame
+	var saved_lap := mgr.current_lap
+	var saved_state := mgr.state
+	var saved_time: float = mgr.race_time
+	Input.action_press("reset_car")
+	for i in 90:
+		await ctx.tree.physics_frame
+	Input.action_release("reset_car")
+	var up: Vector3 = car.global_transform.basis.y
+	ctx.check(up.y > 0.9, "reset restores upright mid-race (up.y %.3f)" % up.y)
+	ctx.check(car.linear_velocity.length() < 1.0, "reset leaves car slow (%.2f m/s)" % car.linear_velocity.length())
+	ctx.check(car.global_position.y > 0.3 and car.global_position.y < 2.0, "reset parks at sane height (y %.2f)" % car.global_position.y)
+	ctx.check(is_instance_valid(car), "car survives reset_car mid-race")
+	ctx.check(mgr.state == saved_state, "reset keeps race state valid")
+	ctx.check(mgr.current_lap == saved_lap, "reset keeps lap count valid (%d)" % mgr.current_lap)
+	var elapsed: float = mgr.race_time - saved_time
+	ctx.check(elapsed >= 0.0, "reset never rewinds the race clock (Δ %.3f)" % elapsed)
+	ctx.check(elapsed < 5.0, "reset keeps the race clock running (Δ %.3f)" % elapsed)
 	await ctx._despawn_car()
 	mgr.queue_free()
 	await ctx.tree.process_frame
