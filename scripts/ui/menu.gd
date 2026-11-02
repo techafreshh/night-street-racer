@@ -37,7 +37,10 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause") or event.is_action_pressed("ui_cancel"):
-		get_tree().quit()
+		if menu_mode == 1:
+			_on_back()
+		# menu_mode 0 is the top level: Esc is a no-op so a composed race
+		# scene keeps Esc for pausing; the QuitButton stays the sole way out.
 
 
 func _btn(button_name: String) -> BaseButton:
