@@ -42,6 +42,26 @@ static func _string_list(v: Variant) -> Array[String]:
 	return out
 
 
+## Single-read snapshot of the unlocked event ladder (issue #168): the menu
+## grid builds one Button per event, so it snapshots once and evaluates
+## every button with the disk-free is_unlocked_with instead of re-reading
+## the save file per button.
+static func unlocked_events() -> Array[String]:
+	var data := SaveSystem.load_game()
+	var progress: Dictionary = data.get("progress", {})
+	return _string_list(progress.get("unlocked_events", []))
+
+## Disk-free lock rule over a snapshot from unlocked_events(): null never
+## opens, an empty unlock_req is open from the start, otherwise the
+## requirement must sit in the snapshot.
+static func is_unlocked_with(ev: RaceEvent, unlocked: Array[String]) -> bool:
+	if ev == null:
+		return false
+	if ev.unlock_req == &"":
+		return true
+	return unlocked.has(String(ev.unlock_req))
+
+
 ## Save-backed lock rule: null never opens, an empty unlock_req is open
 ## from the start, otherwise the requirement must sit in unlocked_events.
 static func is_event_unlocked(ev: RaceEvent) -> bool:
@@ -49,10 +69,7 @@ static func is_event_unlocked(ev: RaceEvent) -> bool:
 		return false
 	if ev.unlock_req == &"":
 		return true
-	var data := SaveSystem.load_game()
-	var progress: Dictionary = data.get("progress", {})
-	var events := _string_list(progress.get("unlocked_events", []))
-	return events.has(String(ev.unlock_req))
+	return is_unlocked_with(ev, unlocked_events())
 
 
 ## Next rung after event_id, or "" when unknown or already last.
