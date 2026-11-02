@@ -17,6 +17,8 @@ func get_test_names() -> Array[String]:
 		"test_event_grid_async_completes",
 		"test_event_press_writes_current_event",
 		"test_event_select_grid_skips_invalid",
+		"test_event_grid_single_save_read",
+		"test_event_grid_no_per_button_reads",
 	]
 	return names
 
@@ -281,4 +283,107 @@ func test_event_select_grid_skips_invalid() -> bool:
 	ctx.tree.root.remove_child(select)
 	select.free()
 	await ctx.tree.process_frame
+	return true
+
+func test_event_grid_single_save_read() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	ctx.check(packed is PackedScene, "event_select.tscn loads for the single-read probe")
+	if not (packed is PackedScene):
+		return true
+	var seed := SaveSystem.default_data()
+	(seed["progress"] as Dictionary)["unlocked_events"] = ["harbor_sprint"]
+	(seed["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": 88.2, "best_position": 1}
+	ctx.check(SaveSystem.save_game(seed), "single-read probe seeds a partial save")
+	var unlocked := Progression.unlocked_events()
+	var bests := TimeTrial.all_bests()
+	ctx.check((unlocked as Array) == ["harbor_sprint"], "one unlock snapshot holds the seeded ladder")
+	ctx.check(absf(float(bests.get("harbor_sprint", -1.0)) - 88.2) < 0.001, "one best snapshot holds the seeded 88.2")
+	var select: Node = packed.instantiate()
+	ctx.tree.root.add_child(select)
+	var grid := select.find_child("EventGrid", true, false) as GridContainer
+	ctx.check(grid != null, "single-read probe has an EventGrid")
+	var expected := 0
+	for path in MenuUI.EVENT_PATHS:
+		var asset := load(path) as RaceEvent
+		if asset != null and RaceEvent.validate(asset):
+			expected += 1
+	if grid != null:
+		for _i in 60:
+			if grid.get_child_count() >= expected:
+				break
+			await ctx.tree.process_frame
+		ctx.check(grid.get_child_count() == expected, "grid builds all %d validated events from the seeded save" % expected)
+		for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]:
+			var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
+			if ev == null:
+				continue
+			var want_open := Progression.is_unlocked_with(ev, unlocked)
+			ctx.check(MenuUI.is_unlocked(ev) == want_open, "%s snapshot parity with the legacy shim" % stem)
+			ctx.check(absf(TimeTrial.get_best(stem) - float(bests.get(stem, -1.0))) < 0.001, "%s best parity with the snapshot" % stem)
+			var btn := select.find_child("Event_" + stem, true, false) as Button
+			ctx.check(btn != null, "seeded grid has a button for %s" % stem)
+			if btn == null:
+				continue
+			ctx.check(btn.disabled == (not want_open), "%s disabled matches the snapshot lock" % stem)
+			if want_open:
+				ctx.check(not btn.text.contains("Locked"), "%s open button carries no lock suffix" % stem)
+			else:
+				ctx.check(btn.text.contains("Locked"), "%s locked button carries the lock suffix" % stem)
+				ctx.check(btn.focus_mode == Control.FOCUS_NONE, "%s locked button skips focus" % stem)
+			if stem == "harbor_sprint":
+				ctx.check(btn.text.contains(TimeTrial.format_time(88.2)), "seeded best renders its BEST tag (got %s)" % btn.text)
+			else:
+				ctx.check(not btn.text.contains("BEST"), "%s with no record carries no BEST tag" % stem)
+	ctx.tree.root.remove_child(select)
+	select.free()
+	await ctx.tree.process_frame
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "single-read probe restores defaults")
+	return true
+
+func test_event_grid_no_per_button_reads() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	ctx.check(src != "", "menu.gd source loads for the no-per-button-read probe")
+	if src == "":
+		return true
+	var btn_start := src.find("func _add_event_button")
+	ctx.check(btn_start >= 0, "menu.gd keeps _add_event_button")
+	if btn_start >= 0:
+		var btn_rest := src.substr(btn_start)
+		var btn_next := btn_rest.find("\nfunc ", 1)
+		var btn_body := btn_rest.substr(0, btn_next) if btn_next >= 0 else btn_rest
+		for banned in ["load_game", "get_best(", "is_event_unlocked(", "is_unlocked("]:
+			ctx.check(not btn_body.contains(banned), "_add_event_button performs no %s (builder snapshots once)" % banned)
+	var async_start := src.find("func _build_event_grid_async")
+	ctx.check(async_start >= 0, "menu.gd keeps _build_event_grid_async")
+	if async_start >= 0:
+		var async_rest := src.substr(async_start)
+		var async_next := async_rest.find("\nfunc ", 1)
+		var async_body := async_rest.substr(0, async_next) if async_next >= 0 else async_rest
+		ctx.check(async_body.contains("Progression.unlocked_events()"), "async builder snapshots unlocks once")
+		ctx.check(async_body.contains("TimeTrial.all_bests()"), "async builder snapshots bests once")
+		ctx.check(async_body.contains("is_unlocked_with"), "async builder evaluates locks from the snapshot")
+		ctx.check(async_body.contains("EVENT_GRID_READY"), "async builder still prints EVENT_GRID_READY")
+	var prog := FileAccess.get_file_as_string("res://scripts/game/progression.gd")
+	ctx.check(prog.contains("func unlocked_events"), "progression.gd exposes the unlock snapshot")
+	ctx.check(prog.contains("func is_unlocked_with"), "progression.gd exposes the pure lock predicate")
+	var pure_start := prog.find("func is_unlocked_with")
+	if pure_start >= 0:
+		var pure_rest := prog.substr(pure_start)
+		var pure_next := pure_rest.find("\nstatic func ", 1)
+		var pure_body := pure_rest.substr(0, pure_next) if pure_next >= 0 else pure_rest
+		ctx.check(not pure_body.contains("load_game"), "is_unlocked_with evaluates with no disk read")
+	var tt := FileAccess.get_file_as_string("res://scripts/race/time_trial.gd")
+	ctx.check(tt.contains("func all_bests"), "time_trial.gd exposes the best snapshot")
+	var snap_start := tt.find("func all_bests")
+	if snap_start >= 0:
+		var snap_rest := tt.substr(snap_start)
+		var snap_next := snap_rest.find("\nstatic func ", 1)
+		var snap_body := snap_rest.substr(0, snap_next) if snap_next >= 0 else snap_rest
+		ctx.check(snap_body.contains("load_game"), "all_bests performs the single bests read")
+	var table_start := tt.find("func _best_from_table")
+	if table_start >= 0:
+		var table_rest := tt.substr(table_start)
+		var table_next := table_rest.find("\nstatic func ", 1)
+		var table_body := table_rest.substr(0, table_next) if table_next >= 0 else table_rest
+		ctx.check(not table_body.contains("load_game"), "_best_from_table evaluates with no disk read")
 	return true

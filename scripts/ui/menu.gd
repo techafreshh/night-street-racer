@@ -153,6 +153,11 @@ func _build_event_grid_async() -> void:
 				break
 		if not pending:
 			break
+	# One disk read per save domain for the whole grid (issue #168): every
+	# button below evaluates lock state and BEST tags from these snapshots
+	# instead of re-reading the save file per button.
+	var unlocked := Progression.unlocked_events()
+	var bests := TimeTrial.all_bests()
 	for path in EVENT_PATHS:
 		if not is_instance_valid(grid) or grid.is_queued_for_deletion():
 			return
@@ -167,7 +172,7 @@ func _build_event_grid_async() -> void:
 		if not RaceEvent.validate(ev):
 			push_warning("MenuUI: skipping invalid event %s" % path)
 			continue
-		_add_event_button(grid, ev)
+		_add_event_button(grid, ev, Progression.is_unlocked_with(ev, unlocked), float(bests.get(ev.route_id, -1.0)))
 	if not is_instance_valid(grid) or grid.is_queued_for_deletion():
 		return
 	_wire_select_mode()
@@ -181,14 +186,14 @@ func _build_event_grid() -> void:
 
 
 ## Spawn one Button for ev: "Event_<route_id>", disabled and focus-skipped
-## when locked, wired to _on_event_chosen when open.
-func _add_event_button(grid: GridContainer, ev: RaceEvent) -> void:
+## when locked, wired to _on_event_chosen when open. Pure button builder
+## (issue #168): lock state and best arrive precomputed from the grid
+## builder's single save snapshot, so this function performs no disk I/O.
+func _add_event_button(grid: GridContainer, ev: RaceEvent, unlocked: bool, best: float) -> void:
 	var btn := Button.new()
 	btn.name = "Event_%s" % ev.route_id
 	btn.custom_minimum_size = Vector2(320, 48)
-	var unlocked := MenuUI.is_unlocked(ev)
 	btn.text = "%s (%d laps, %d rivals)" % [ev.route_id, ev.laps, ev.opponents]
-	var best := TimeTrial.get_best(ev.route_id)
 	if best > 0.0:
 		btn.text += "  BEST %s" % TimeTrial.format_time(best)
 	if unlocked:

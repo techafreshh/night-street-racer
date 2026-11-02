@@ -18,15 +18,11 @@ static func is_time_trial_mode(m: Variant) -> bool:
 	return StringName(str(m)) == MODE_TIME_TRIAL
 
 
-## Stored best for event_id in seconds, or -1.0 when absent or corrupt.
-static func get_best(event_id: String) -> float:
+## Disk-free best lookup inside one records table: absent or corrupt
+## entries read as -1.0 with no I/O of their own.
+static func _best_from_table(table: Dictionary, event_id: String) -> float:
 	if event_id.is_empty():
 		return -1.0
-	var data := SaveSystem.load_game()
-	var records: Variant = data.get("records", {})
-	if not (records is Dictionary):
-		return -1.0
-	var table := records as Dictionary
 	if not table.has(event_id):
 		return -1.0
 	var entry: Variant = table[event_id]
@@ -40,6 +36,34 @@ static func get_best(event_id: String) -> float:
 	if float(best) <= 0.0:
 		return -1.0
 	return float(best)
+
+
+## Stored best for event_id in seconds, or -1.0 when absent or corrupt.
+static func get_best(event_id: String) -> float:
+	if event_id.is_empty():
+		return -1.0
+	var data := SaveSystem.load_game()
+	var records: Variant = data.get("records", {})
+	if not (records is Dictionary):
+		return -1.0
+	return _best_from_table(records as Dictionary, event_id)
+
+
+## Single-read snapshot of every stored best ({event_id: best_time_s},
+## corrupt entries dropped) so the menu grid renders all BEST tags from
+## one disk read instead of one get_best load per button (issue #168).
+static func all_bests() -> Dictionary:
+	var out := {}
+	var data := SaveSystem.load_game()
+	var records: Variant = data.get("records", {})
+	if not (records is Dictionary):
+		return out
+	var table := records as Dictionary
+	for key in table.keys():
+		var best := _best_from_table(table, String(key))
+		if best > 0.0:
+			out[String(key)] = best
+	return out
 
 
 ## Signed gap to the stored best: race_time - best (ahead is negative).
