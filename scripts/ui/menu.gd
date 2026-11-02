@@ -92,10 +92,10 @@ func _on_garage() -> void:
 	var info := _info()
 	if info != null:
 		info.text = "Garage available in a later lap"
-	var gs := get_node_or_null("/root/GameState")
+	var gs = get_node_or_null("/root/GameState")
 	if gs != null:
 		if StringName(gs.get("selected_car")) == &"":
-			gs.set("selected_car", gs.get("DEFAULT_CAR"))
+			gs.select_car(String(gs.get("DEFAULT_CAR")))
 		print("CAR_SELECTED %s" % StringName(gs.get("selected_car")))
 
 
