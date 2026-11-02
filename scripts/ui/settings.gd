@@ -23,6 +23,7 @@ const TOGGLES: Array = [
 
 func _ready() -> void:
 	print("SETTINGS_READY")
+	_start_menu_music()
 	_seed_widgets()
 	_wire_widgets()
 	_wire_back()
@@ -99,6 +100,7 @@ func _wire_toggle(toggle_name: String, key: String) -> void:
 
 
 func _on_slider_changed(value: float, key: String) -> void:
+	_play_click()
 	var settings := _settings()
 	if settings != null:
 		settings.set(key, value)
@@ -107,6 +109,7 @@ func _on_slider_changed(value: float, key: String) -> void:
 
 
 func _on_toggle_changed(button_pressed: bool, key: String) -> void:
+	_play_click()
 	var settings := _settings()
 	if settings != null:
 		settings.set(key, button_pressed)
@@ -132,6 +135,20 @@ func _persist_disk_flag(key: String, flag: bool) -> void:
 	SaveSystem.save_game(data)
 
 
+## Guarded UI click plus menu-music (re)start: no-ops headless or when
+## the mixer singleton is absent.
+func _play_click() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("play_click"):
+		am.call("play_click")
+
+
+func _start_menu_music() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("start_menu_music"):
+		am.call("start_menu_music")
+
+
 func _wire_back() -> void:
 	var back := find_child("BackButton", true, false) as BaseButton
 	if back != null:
@@ -139,6 +156,7 @@ func _wire_back() -> void:
 
 
 func _on_back() -> void:
+	_play_click()
 	var tree := get_tree()
 	if tree == null:
 		return

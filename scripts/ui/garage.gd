@@ -65,6 +65,7 @@ static func mode_label(drivetrain: int) -> String:
 
 func _ready() -> void:
 	print("GARAGE_READY")
+	_start_menu_music()
 	_resolve_selection()
 	_build_swatches()
 	_wire_back()
@@ -224,6 +225,7 @@ func _wire_start() -> void:
 
 
 func _on_start_race() -> void:
+	_play_click()
 	var event_id := "harbor_sprint"
 	var gs := _game_state()
 	if gs != null:
@@ -255,6 +257,7 @@ func _focus_first() -> void:
 
 
 func _on_car_chosen(car_id: String) -> void:
+	_play_click()
 	_current_car = StringName(car_id)
 	var gs := _game_state()
 	if gs != null:
@@ -265,6 +268,7 @@ func _on_car_chosen(car_id: String) -> void:
 
 
 func _on_color_chosen(color_idx: int) -> void:
+	_play_click()
 	_current_color = posmod(color_idx, CarPaint.COLORS.size())
 	var gs := _game_state()
 	if gs != null:
@@ -276,10 +280,25 @@ func _on_color_chosen(color_idx: int) -> void:
 
 
 func _on_back() -> void:
+	_play_click()
 	var tree := get_tree()
 	if tree == null:
 		return
 	tree.change_scene_to_file("res://scenes/ui/main_menu.tscn")
+
+
+## Guarded UI click plus menu-music (re)start: no-ops headless or when
+## the mixer singleton is absent.
+func _play_click() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("play_click"):
+		am.call("play_click")
+
+
+func _start_menu_music() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("start_menu_music"):
+		am.call("start_menu_music")
 
 
 ## Rebuild the turntable preview: clear the pivot, instance the chosen car

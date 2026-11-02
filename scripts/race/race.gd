@@ -107,6 +107,9 @@ func _spawn_player_car() -> void:
 	car.use_player_input = true
 	_player_car = car
 	add_child(car)
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("register_vehicle"):
+		am.call("register_vehicle", car)
 	_place_on_route(car)
 
 
@@ -189,6 +192,9 @@ func _is_time_trial() -> bool:
 func _bind_race() -> void:
 	if _manager != null and _route != null:
 		_manager.bind_route(_route)
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio != null and audio.has_method("duck_music_for_race"):
+		audio.call("duck_music_for_race")
 	if _manager != null:
 		if not _manager.race_finished.is_connected(_on_finished):
 			_manager.race_finished.connect(_on_finished)
