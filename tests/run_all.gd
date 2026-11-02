@@ -334,22 +334,48 @@ func test_garage_writes_selected_car() -> bool:
 	await process_frame
 	await process_frame
 	var garage := instance.find_child("GarageButton", true, false) as BaseButton
-	var info := instance.find_child("InfoLabel", true, false) as Label
 	check(garage != null, "main menu has GarageButton")
-	check(info != null, "main menu has InfoLabel")
-	if garage != null and info != null:
+	if garage != null:
 		garage.pressed.emit()
 		await process_frame
-		check(info.text != "", "Garage keeps its placeholder label")
+		await process_frame
 		check(StringName(gs.get("selected_car")) == &"sedan", "fresh Garage press fills selected_car with sedan")
-		gs.set("selected_car", &"hatch")
+		var live := current_scene
+		check(live != null and live != instance, "Garage press leaves MainMenu")
+		check(live != null and (live.name == "Garage" or live.find_child("CarGrid", true, false) != null), "Garage press navigates to the garage scene")
+		if live != null and live != instance:
+			var sedan_btn := live.find_child("Car_sedan", true, false) as BaseButton
+			check(sedan_btn != null, "garage has Car_sedan")
+			if sedan_btn != null:
+				gs.select_car("hatch")
+				sedan_btn.pressed.emit()
+				await process_frame
+				await process_frame
+				check(StringName(gs.get("selected_car")) == &"sedan", "pressing Car_sedan writes selected_car")
+			var back := live.find_child("BackButton", true, false) as BaseButton
+			check(back != null, "garage has a BackButton")
+			if back != null:
+				back.pressed.emit()
+				await process_frame
+				await process_frame
+				var home := current_scene
+				check(home != null and (home.name == "MainMenu" or home.find_child("RaceButton", true, false) != null), "garage BackButton returns to MainMenu")
+		gs.select_car("hatch")
 		garage.pressed.emit()
+		await process_frame
 		await process_frame
 		check(StringName(gs.get("selected_car")) == &"hatch", "Garage never clobbers a pre-set car")
-		check(info.text != "", "placeholder label stays non-empty on repeat press")
+		var again := current_scene
+		check(again != null and (again.name == "Garage" or again.find_child("CarGrid", true, false) != null), "repeat Garage press still navigates to the garage")
 	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
 	check(src.contains("selected_car"), "menu.gd wires selected_car")
 	check(src.contains("CAR_SELECTED"), "menu.gd prints the CAR_SELECTED token")
+	var swapped := current_scene
+	if swapped != null and swapped != instance and is_instance_valid(swapped):
+		if swapped.get_parent() == root:
+			root.remove_child(swapped)
+		swapped.free()
+		await process_frame
 	root.remove_child(instance)
 	instance.free()
 	await process_frame
@@ -414,25 +440,32 @@ func test_garage_writes_via_typed_api() -> bool:
 	await process_frame
 	await process_frame
 	var garage := instance.find_child("GarageButton", true, false) as BaseButton
-	var info := instance.find_child("InfoLabel", true, false) as Label
 	check(garage != null, "main menu has GarageButton")
-	check(info != null, "main menu has InfoLabel")
-	if garage != null and info != null:
+	if garage != null:
 		garage.pressed.emit()
 		await process_frame
-		check(info.text != "", "Garage keeps its placeholder label")
+		await process_frame
 		check(StringName(gs.get("selected_car")) == &"sedan", "fresh Garage press fills selected_car with sedan")
+		var live := current_scene
+		check(live != null and live != instance, "Garage press leaves MainMenu")
+		check(live != null and (live.name == "Garage" or live.find_child("CarGrid", true, false) != null), "Garage press navigates to the garage scene")
 		gs.set("selected_car", &"hatch")
 		garage.pressed.emit()
 		await process_frame
+		await process_frame
 		check(StringName(gs.get("selected_car")) == &"hatch", "Garage never clobbers a pre-set car")
-		check(info.text != "", "placeholder label stays non-empty on repeat press")
 	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
 	check(src.contains("select_car"), "menu.gd routes the garage writer through select_car")
 	check(src.contains("select_event"), "menu.gd routes the event writer through select_event")
 	check(src.contains("CAR_SELECTED"), "menu.gd prints the CAR_SELECTED token")
 	check(not src.contains("gs.set(\"selected_car\""), "menu.gd has no untyped selected_car writer")
 	check(not src.contains("gs.set(\"current_event\""), "menu.gd has no untyped current_event writer")
+	var navigated := current_scene
+	if navigated != null and navigated != instance and is_instance_valid(navigated):
+		if navigated.get_parent() == root:
+			root.remove_child(navigated)
+		navigated.free()
+		await process_frame
 	root.remove_child(instance)
 	instance.free()
 	await process_frame
@@ -682,10 +715,18 @@ func test_menu_buttons() -> bool:
 			swapped.free()
 		await process_frame
 	var garage := instance.find_child("GarageButton", true, false) as BaseButton
-	var info := instance.find_child("InfoLabel", true, false) as Label
-	if garage != null and info != null:
+	if garage != null:
 		garage.pressed.emit()
-		check(info.text != "", "Garage shows a placeholder label instead of erroring")
+		await process_frame
+		await process_frame
+		check(is_instance_valid(garage), "pressing Garage does not error")
+		var garaged := current_scene
+		check(garaged != null and garaged != instance, "Garage press leaves MainMenu")
+		check(garaged != null and (garaged.name == "Garage" or garaged.find_child("CarGrid", true, false) != null), "Garage press navigates to the garage scene")
+		if garaged != null and garaged != instance:
+			root.remove_child(garaged)
+			garaged.free()
+		await process_frame
 	root.remove_child(instance)
 	instance.free()
 	await process_frame
