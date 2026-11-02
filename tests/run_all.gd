@@ -33,6 +33,8 @@ func _run_all() -> void:
 		"test_autoload_gamestate",
 		"test_input_actions",
 		"test_gamestate_standalone",
+		"test_save_system_roundtrip",
+		"test_gamestate_persists_selection",
 		"test_gamestate_selected_car_default",
 		"test_main_menu_scene",
 		"test_menu_buttons",
@@ -205,6 +207,61 @@ func test_gamestate_standalone() -> bool:
 		check(node is Node, "GameState is a Node")
 		if node != null:
 			node.free()
+	return true
+
+func test_save_system_roundtrip() -> bool:
+	check(SaveSystem.SAVE_PATH == "user://save.json", "save path is user://save.json")
+	check(SaveSystem.SAVE_VERSION == 1, "save schema version is 1")
+	var blank := SaveSystem.default_data()
+	check(SaveSystem.validate(blank), "default_data passes SaveSystem.validate()")
+	var data := SaveSystem.default_data()
+	var progress: Dictionary = data["progress"]
+	progress["selected_car"] = "hatch"
+	progress["current_event"] = "neon_loop"
+	check(SaveSystem.save_game(data), "save_game writes a non-default dict")
+	var loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(loaded), "written save loads back valid")
+	var loaded_progress: Dictionary = loaded["progress"]
+	check(str(loaded_progress.get("selected_car")) == "hatch", "roundtrip keeps selected_car")
+	check(str(loaded_progress.get("current_event")) == "neon_loop", "roundtrip keeps current_event")
+	check(int(loaded.get("version")) == SaveSystem.SAVE_VERSION, "roundtrip keeps version")
+	var corrupt := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(corrupt != null, "save path opens for the corruption probe")
+	if corrupt != null:
+		corrupt.store_string("{not valid json!!!")
+		corrupt.close()
+	var fallback := SaveSystem.load_game()
+	check(SaveSystem.validate(fallback), "corrupt file falls back to valid defaults")
+	var fallback_progress: Dictionary = fallback["progress"]
+	check(str(fallback_progress.get("selected_car")) == "", "corrupt fallback resets selected_car")
+	check(str(fallback_progress.get("current_event")) == "", "corrupt fallback resets current_event")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "save restores defaults after the probe")
+	return true
+
+func test_gamestate_persists_selection() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the persistence probe")
+	if script == null:
+		return true
+	check(SaveSystem.save_game(SaveSystem.default_data()), "persistence probe starts from defaults")
+	var first = script.new()
+	check(first != null, "first GameState instantiates standalone")
+	if first == null:
+		return true
+	first.select_car("hatch")
+	first.select_event("neon_loop")
+	var second = script.new()
+	check(second != null, "second GameState instantiates standalone")
+	if second == null:
+		first.free()
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	second.reload_from_disk()
+	check(StringName(second.get("selected_car")) == &"hatch", "fresh instance observes saved selected_car")
+	check(StringName(second.get("current_event")) == &"neon_loop", "fresh instance observes saved current_event")
+	first.free()
+	second.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "persistence probe restores defaults")
 	return true
 
 func test_gamestate_selected_car_default() -> bool:

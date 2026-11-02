@@ -147,7 +147,7 @@ func _build_event_grid() -> void:
 
 
 func _on_event_chosen(route_id: String) -> void:
-	var gs := get_node_or_null("/root/GameState")
+	var gs = get_node_or_null("/root/GameState")
 	if gs != null:
-		gs.set("current_event", StringName(route_id))
+		gs.select_event(route_id)
 		print("EVENT_SELECTED %s" % route_id)
