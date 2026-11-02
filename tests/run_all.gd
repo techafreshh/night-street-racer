@@ -34,6 +34,8 @@ func _run_all() -> void:
 		"test_input_actions",
 		"test_gamestate_standalone",
 		"test_main_menu_scene",
+		"test_menu_buttons",
+		"test_event_select_grid",
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
 		"test_coast_upshifts_without_throttle",
@@ -210,6 +212,94 @@ func test_main_menu_scene() -> bool:
 		if instance != null:
 			check(instance.name == "MainMenu", "root node is MainMenu")
 			instance.free()
+	return true
+
+func test_menu_buttons() -> bool:
+	var packed = load("res://scenes/ui/main_menu.tscn")
+	check(packed is PackedScene, "main_menu.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "main menu instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "MainMenu", "root node is MainMenu")
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	for bname in ["RaceButton", "GarageButton", "SettingsButton"]:
+		var btn := instance.find_child(bname, true, false) as BaseButton
+		check(btn != null, "main menu has %s" % bname)
+		if btn != null:
+			check(btn.focus_mode != Control.FOCUS_NONE, "%s is focus-enabled for keyboard/gamepad" % bname)
+	var quit_btn := instance.find_child("QuitButton", true, false) as BaseButton
+	check(quit_btn != null, "main menu has QuitButton")
+	var focus_owner := instance.get_viewport().gui_get_focus_owner()
+	check(focus_owner != null, "a menu button holds keyboard/gamepad focus")
+	var race := instance.find_child("RaceButton", true, false) as BaseButton
+	if race != null:
+		race.pressed.emit()
+		await process_frame
+		await process_frame
+		check(is_instance_valid(race), "pressing Race does not error")
+		var swapped := current_scene
+		if swapped != null and swapped != instance:
+			root.remove_child(swapped)
+			swapped.free()
+		await process_frame
+	var garage := instance.find_child("GarageButton", true, false) as BaseButton
+	var info := instance.find_child("InfoLabel", true, false) as Label
+	if garage != null and info != null:
+		garage.pressed.emit()
+		check(info.text != "", "Garage shows a placeholder label instead of erroring")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	return true
+
+func test_event_select_grid() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	check(packed is PackedScene, "event_select.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "event select instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "EventSelect", "root node is EventSelect")
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var grid := instance.find_child("EventGrid", true, false) as GridContainer
+	check(grid != null, "event select has an EventGrid")
+	if grid == null:
+		root.remove_child(instance)
+		instance.free()
+		return true
+	check(grid.get_child_count() >= 5, "grid holds >= 5 event buttons (got %d)" % grid.get_child_count())
+	var enabled := 0
+	for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]:
+		var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
+		check(ev != null, "%s loads as RaceEvent" % stem)
+		var btn := instance.find_child("Event_" + stem, true, false) as BaseButton
+		check(btn != null, "grid has a button for %s" % stem)
+		if btn == null:
+			continue
+		check((btn as Button).text.contains(stem), "button text names %s" % stem)
+		var should_lock := ev == null or not MenuUI.is_unlocked(ev)
+		check(btn.disabled == should_lock, "%s disabled matches lock state" % stem)
+		if not btn.disabled:
+			enabled += 1
+			check(btn.focus_mode != Control.FOCUS_NONE, "%s stays focusable" % stem)
+	check(enabled >= 1, "at least one event is unlocked (got %d)" % enabled)
+	var harbor := instance.find_child("Event_harbor_sprint", true, false) as BaseButton
+	if harbor != null:
+		check(harbor.disabled == false, "harbor_sprint renders unlocked")
+	var back := instance.find_child("BackButton", true, false) as BaseButton
+	check(back != null, "event select has a BackButton")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
 	return true
 
 func test_vehicle_scene_loads() -> bool:
