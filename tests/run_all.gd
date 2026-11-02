@@ -39,6 +39,8 @@ func _run_all() -> void:
 		"test_main_menu_scene",
 		"test_menu_buttons",
 		"test_garage_writes_selected_car",
+		"test_gamestate_typed_writers",
+		"test_garage_writes_via_typed_api",
 		"test_event_select_grid",
 		"test_event_press_writes_current_event",
 		"test_event_select_grid_skips_invalid",
@@ -329,6 +331,89 @@ func test_garage_writes_selected_car() -> bool:
 	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
 	check(src.contains("selected_car"), "menu.gd wires selected_car")
 	check(src.contains("CAR_SELECTED"), "menu.gd prints the CAR_SELECTED token")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	gs.set("selected_car", prev_car)
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
+	return true
+
+func test_gamestate_typed_writers() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for typed writers")
+	if script == null:
+		return true
+	check(StringName(script.get("DEFAULT_CAR")) == &"sedan", "DEFAULT_CAR is sedan")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "typed-writer probe starts from defaults")
+	var node = script.new()
+	check(node != null, "GameState instantiates standalone for typed writers")
+	if node == null:
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	check(node.has_method("select_car"), "GameState exposes select_car")
+	check(node.has_method("select_event"), "GameState exposes select_event")
+	node.select_car("hatch")
+	check(StringName(node.get("selected_car")) == &"hatch", "select_car writes selected_car")
+	node.select_event("neon_loop")
+	check(StringName(node.get("current_event")) == &"neon_loop", "select_event writes current_event")
+	node.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "typed-writer probe restores defaults")
+	var car_packed = load("res://scenes/vehicles/car_sedan.tscn")
+	check(car_packed is PackedScene, "default car scene car_sedan.tscn loads")
+	return true
+
+func test_garage_writes_via_typed_api() -> bool:
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for typed garage wiring")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable for typed garage probe")
+	if gs == null:
+		return true
+	var prev_car := StringName(gs.get("selected_car"))
+	gs.set("selected_car", &"")
+	var packed = load("res://scenes/ui/main_menu.tscn")
+	check(packed is PackedScene, "main_menu.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		gs.set("selected_car", prev_car)
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var garage := instance.find_child("GarageButton", true, false) as BaseButton
+	var info := instance.find_child("InfoLabel", true, false) as Label
+	check(garage != null, "main menu has GarageButton")
+	check(info != null, "main menu has InfoLabel")
+	if garage != null and info != null:
+		garage.pressed.emit()
+		await process_frame
+		check(info.text != "", "Garage keeps its placeholder label")
+		check(StringName(gs.get("selected_car")) == &"sedan", "fresh Garage press fills selected_car with sedan")
+		gs.set("selected_car", &"hatch")
+		garage.pressed.emit()
+		await process_frame
+		check(StringName(gs.get("selected_car")) == &"hatch", "Garage never clobbers a pre-set car")
+		check(info.text != "", "placeholder label stays non-empty on repeat press")
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	check(src.contains("select_car"), "menu.gd routes the garage writer through select_car")
+	check(src.contains("select_event"), "menu.gd routes the event writer through select_event")
+	check(src.contains("CAR_SELECTED"), "menu.gd prints the CAR_SELECTED token")
+	check(not src.contains("gs.set(\"selected_car\""), "menu.gd has no untyped selected_car writer")
+	check(not src.contains("gs.set(\"current_event\""), "menu.gd has no untyped current_event writer")
 	root.remove_child(instance)
 	instance.free()
 	await process_frame
