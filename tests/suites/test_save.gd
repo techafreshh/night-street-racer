@@ -28,6 +28,7 @@ func get_test_names() -> Array[String]:
 		"test_gamestate_coalesces_rapid_writes",
 		"test_gamestate_reload_rejects_non_numeric_color",
 		"test_gamestate_selected_car_default",
+		"settings_persist_across_load",
 	]
 	return names
 
@@ -670,4 +671,53 @@ func test_gamestate_selected_car_default() -> bool:
 	node.free()
 	var car_packed = load("res://scenes/vehicles/car_sedan.tscn")
 	ctx.check(car_packed is PackedScene, "default car scene car_sedan.tscn loads")
+	return true
+
+func settings_persist_across_load() -> bool:
+	var script = load("res://scripts/game/settings.gd")
+	ctx.check(script != null, "settings.gd loads for the persistence probe")
+	if script == null:
+		return true
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "settings probe starts from defaults")
+	var first = script.new()
+	ctx.check(first != null, "first Settings instantiates standalone")
+	if first == null:
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	first.set("master_volume", 0.3)
+	first.set("music_volume", 0.4)
+	first.set("sfx_volume", 0.5)
+	first.set("assists", false)
+	first.set("camera_shake", false)
+	first.flush()
+	var second = script.new()
+	ctx.check(second != null, "second Settings instantiates standalone")
+	if second == null:
+		first.free()
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	second.reload_from_disk()
+	ctx.check(absf(float(second.get("master_volume")) - 0.3) < 0.001, "fresh instance observes saved master_volume")
+	ctx.check(absf(float(second.get("music_volume")) - 0.4) < 0.001, "fresh instance observes saved music_volume")
+	ctx.check(absf(float(second.get("sfx_volume")) - 0.5) < 0.001, "fresh instance observes saved sfx_volume")
+	ctx.check(bool(second.get("assists")) == false, "fresh instance observes saved assists")
+	ctx.check(bool(second.get("camera_shake")) == false, "fresh instance observes saved camera_shake")
+	first.free()
+	second.free()
+	var bad := SaveSystem.default_data()
+	(bad["settings"] as Dictionary)["master_volume"] = "loud"
+	(bad["settings"] as Dictionary)["music_volume"] = 2.0
+	(bad["settings"] as Dictionary)["sfx_volume"] = -1.0
+	(bad["settings"] as Dictionary)["assists"] = 1
+	(bad["settings"] as Dictionary)["camera_shake"] = "yes"
+	ctx.check(SaveSystem.save_game(bad), "save_game writes corrupt settings probe")
+	var probe = script.new()
+	probe.reload_from_disk()
+	ctx.check(absf(float(probe.get("master_volume")) - 0.8) < 0.001, "String master_volume reloads to the safe default")
+	ctx.check(absf(float(probe.get("music_volume")) - 0.7) < 0.001, "out-of-range music_volume reloads to the safe default")
+	ctx.check(absf(float(probe.get("sfx_volume")) - 0.9) < 0.001, "out-of-range sfx_volume reloads to the safe default")
+	ctx.check(bool(probe.get("assists")) == true, "non-bool assists reloads to the safe default")
+	ctx.check(bool(probe.get("camera_shake")) == true, "non-bool camera_shake reloads to the safe default")
+	probe.free()
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "settings probe restores defaults")
 	return true

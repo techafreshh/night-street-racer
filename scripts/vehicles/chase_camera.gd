@@ -37,6 +37,13 @@ func _process(delta: float) -> void:
 	var to_look := look - global_position
 	if to_look.length() > 0.05 and absf(to_look.normalized().dot(Vector3.UP)) < 0.999:
 		look_at(look, Vector3.UP)
+	if is_inside_tree() and get_tree() != null:
+		var settings := get_node_or_null("/root/Settings")
+		if settings != null:
+			for prop in settings.get_property_list():
+				if prop.get("name") == "camera_shake":
+					camera_shake = bool(settings.get("camera_shake"))
+					break
 	if camera_shake and speed > 1.0:
 		var s := shake_amplitude * t
 		translate(Vector3(sin(_time * 31.0) * s, sin(_time * 47.0 + 1.3) * s * 0.6, 0.0))
