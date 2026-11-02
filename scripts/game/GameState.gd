@@ -62,6 +62,10 @@ var current_event: StringName = &"":
 var unlocked_events: Array = []
 var unlocked_cars: Array = []
 
+## Runtime-only run-mode selector (&"race" / &"time_trial"): never
+## persisted to user://save.json, so _persist/reload leave it untouched.
+var current_mode: StringName = &"race"
+
 
 func _ready() -> void:
 	reload_from_disk()
@@ -70,6 +74,11 @@ func _ready() -> void:
 ## Typed writer: record the chosen event and persist it.
 func select_event(route_id: String) -> void:
 	current_event = StringName(route_id)
+
+
+## Typed writer: record the run mode (race or time_trial) in memory only.
+func select_mode(m: String) -> void:
+	current_mode = StringName(m)
 
 
 ## Typed writer: record the chosen car and persist it.

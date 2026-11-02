@@ -14,6 +14,7 @@ var _speed_label: Label
 var _gear_label: Label
 var _position_label: Label
 var _timer_label: Label
+var _delta_label: Label
 var _drift_popup: Label
 var _player_dot: ColorRect
 var _checkpoint_layer: Control
@@ -25,6 +26,7 @@ func _ready() -> void:
 	_gear_label = get_node_or_null("GearLabel") as Label
 	_position_label = get_node_or_null("PositionLabel") as Label
 	_timer_label = get_node_or_null("TimerLabel") as Label
+	_delta_label = get_node_or_null("DeltaLabel") as Label
 	_drift_popup = get_node_or_null("DriftPopup") as Label
 	_player_dot = get_node_or_null("Minimap/SubViewport/PlayerDot") as ColorRect
 	_checkpoint_layer = get_node_or_null("Minimap/SubViewport/CheckpointLayer") as Control
@@ -32,6 +34,7 @@ func _ready() -> void:
 	set_gear(1, false)
 	set_lap_position(1, 1, 1, 1)
 	set_race_time(0.0)
+	clear_delta()
 	if _drift_popup != null:
 		_drift_popup.visible = false
 	_wire_race_signals()
@@ -85,6 +88,23 @@ func set_race_time(seconds: float) -> void:
 	if millis >= 1000:
 		millis = 999
 	_timer_label.text = "%02d:%02d.%03d" % [minutes, secs, millis]
+
+
+## Live time-trial delta in seconds (race_time - best); ahead shows
+## "-mm:ss.mmm", behind shows "+mm:ss.mmm". Hidden without a best.
+func set_delta(d: float) -> void:
+	if _delta_label == null:
+		return
+	_delta_label.text = TimeTrial.format_delta(d)
+	_delta_label.visible = true
+
+
+## Hide the delta sink and park the placeholder text.
+func clear_delta() -> void:
+	if _delta_label == null:
+		return
+	_delta_label.text = "--:--.---"
+	_delta_label.visible = false
 
 
 ## Drift feedback popup; fades out on its own in _process.

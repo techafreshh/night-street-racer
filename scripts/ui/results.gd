@@ -196,33 +196,12 @@ func _show_unlock(snap: Dictionary) -> void:
 	_unlock_banner.visible = true
 
 
-## Compare the player time against the stored records entry and persist
-## the improvement; BestBanner shows only when the time is beaten or no
-## record exists yet.
+## Compare the player time against the stored records entry through the
+## shared TimeTrial helper; BestBanner shows only when the time is beaten
+## or no record exists yet.
 func _compare_best(player_time: float, player_place: int) -> void:
-	var data := SaveSystem.load_game()
-	var records: Variant = data.get("records", {})
-	if not (records is Dictionary):
-		return
-	var table := records as Dictionary
-	var improved := false
-	if not table.has(_event_id):
-		improved = true
-	else:
-		var entry: Variant = table[_event_id]
-		if entry is Dictionary and (entry as Dictionary).has("best_time_s"):
-			var stored: Variant = (entry as Dictionary)["best_time_s"]
-			if stored is int or stored is float:
-				improved = player_time < float(stored)
-			else:
-				improved = true
-		else:
-			improved = true
+	var improved := TimeTrial.save_best_if_faster(_event_id, player_time, player_place)
 	if not improved:
-		return
-	table[_event_id] = {"best_time_s": player_time, "best_position": player_place}
-	data["records"] = table
-	if not SaveSystem.save_game(data):
 		return
 	if _best_banner != null:
 		_best_banner.text = "NEW BEST: %s" % _format_time(player_time)

@@ -10,5 +10,6 @@ laps = 1
 opponents = 3
 unlock_req = &""
 reward = 500
+mode = &"race"
 checkpoints = PackedVector3Array(-102, 1, 136, -51, 1, 136, 0, 1, 136, 51, 1, 136, 102, 1, 136)
 checkpoint_radius = 10.0

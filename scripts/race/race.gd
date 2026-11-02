@@ -113,6 +113,30 @@ func _place_on_route(car: VehicleController) -> void:
 	car.global_transform = Transform3D(Basis(Vector3.UP, yaw), Vector3(start.x, start.y + 1.0, start.z))
 
 
+## Per-frame live delta push: in time-trial mode with a stored best,
+## mirror race_time - best to the HUD DeltaLabel while RACING.
+func _process(_delta: float) -> void:
+	if _manager == null or _manager.state != RaceEventManager.State.RACING:
+		return
+	if not _is_time_trial():
+		return
+	var hud := get_node_or_null("HUD")
+	if hud == null or not hud.has_method("set_delta"):
+		return
+	var best := TimeTrial.get_best(_event_id)
+	if best <= 0.0:
+		return
+	hud.call("set_delta", _manager.race_time - best)
+
+
+## True when GameState selects the solo time-trial mode.
+func _is_time_trial() -> bool:
+	var gs := get_node_or_null("/root/GameState")
+	if gs == null:
+		return false
+	return TimeTrial.is_time_trial_mode(gs.get("current_mode"))
+
+
 ## Bind the route gates to the manager flow, subscribe the finish handoff,
 ## and seed the HUD through its existing setters only.
 func _bind_race() -> void:
@@ -124,6 +148,8 @@ func _bind_race() -> void:
 	var hud := get_node_or_null("HUD")
 	if hud != null and hud.has_method("set_race_time"):
 		hud.call("set_race_time", 0.0)
+	if hud != null and hud.has_method("clear_delta"):
+		hud.call("clear_delta")
 
 
 ## Record the solo player finish through a RacePositions table, hand it to
@@ -136,6 +162,7 @@ func _on_finished() -> void:
 	if _manager != null:
 		race_time = _manager.race_time
 	table.record_finish("player", race_time)
+	TimeTrial.save_best_if_faster(_event_id, race_time)
 	var result := {
 		"event_id": _event_id,
 		"places": table.ordered_results(),
