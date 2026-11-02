@@ -111,6 +111,7 @@ func _run_all() -> void:
 		"test_car_kit_credits",
 		"test_car_scenes_load",
 		"hud_subscribes_to_race_signals",
+		"progression_string_list_drops_empty",
 		"top3_unlocks_next_event",
 		"win_unlocks_car",
 	]
@@ -3389,6 +3390,20 @@ func test_car_scenes_load() -> bool:
 			inst.queue_free()
 			await process_frame
 			await physics_frame
+	return true
+
+func progression_string_list_drops_empty() -> bool:
+	var cleaned := Progression._string_list(["harbor_sprint", "", 42, &"", &"downtown_gp"])
+	check(cleaned == (["harbor_sprint", "downtown_gp"] as Array[String]), "empty String and StringName entries are dropped in order")
+	check(Progression._string_list("harbor_sprint").is_empty(), "non-Array yields empty")
+	var seeded := SaveSystem.default_data()
+	(seeded["progress"] as Dictionary)["unlocked_events"] = ["harbor_sprint", ""]
+	check(SaveSystem.save_game(seeded), "save_game writes the empty-entry seed doc")
+	Progression.apply_result("downtown_gp", 3)
+	var reloaded := SaveSystem.load_game()
+	check(SaveSystem.validate(reloaded), "apply_result load-modify-save from an empty-entry seed re-saves valid")
+	check(not ((reloaded["progress"] as Dictionary).get("unlocked_events", []) as Array).has(""), "re-saved unlocked_events holds no empty String")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "empty-entry probe restores defaults")
 	return true
 
 func top3_unlocks_next_event() -> bool:
