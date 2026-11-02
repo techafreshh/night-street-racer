@@ -109,6 +109,8 @@ func _run_all() -> void:
 		"lap_counting_increments",
 		"positions_sort_by_progress",
 		"results_hold_all_finishers",
+		"test_results_scene_loads",
+		"test_results_applies_unlock_and_best",
 		"test_car_kit_glb_present",
 		"test_car_kit_credits",
 		"test_car_scenes_load",
@@ -3428,6 +3430,125 @@ func results_hold_all_finishers() -> bool:
 	check(table.size() == 0, "clear empties the table")
 	check(table.ordered_results().is_empty(), "ordered results empty after clear")
 	check(table.place_of("player") == 0, "no place survives clear")
+	return true
+
+func test_results_scene_loads() -> bool:
+	var packed = load("res://scenes/ui/results.tscn")
+	check(packed is PackedScene, "results.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "results instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "Results", "root node is Results")
+	check(instance.get_script() != null, "results root carries the Results script")
+	check(instance.find_child("ResultsList", true, false) is VBoxContainer, "results has a ResultsList")
+	var unlock := instance.find_child("UnlockBanner", true, false) as Label
+	check(unlock != null, "results has an UnlockBanner")
+	if unlock != null:
+		check(unlock.visible == false, "UnlockBanner starts hidden")
+	var best := instance.find_child("BestBanner", true, false) as Label
+	check(best != null, "results has a BestBanner")
+	if best != null:
+		check(best.visible == false, "BestBanner starts hidden")
+	for bname in ["NextButton", "RetryButton", "MenuButton"]:
+		var btn := instance.find_child(bname, true, false) as BaseButton
+		check(btn != null, "results has %s" % bname)
+	var src := FileAccess.get_file_as_string("res://scripts/ui/results.gd")
+	check(src.contains("RESULTS_READY"), "results script prints RESULTS_READY")
+	check(src.contains("last_result"), "results script reads the last_result handoff")
+	for banned in ["_physics_process", "apply_force", "apply_central_force", "linear_velocity", "angular_velocity", "RayCast", "PhysicsDirectBodyState3D"]:
+		check(not src.contains(banned), "results script carries no %s" % banned)
+	instance.free()
+	return true
+
+func test_results_applies_unlock_and_best() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "results probe starts from defaults")
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for results probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable for results probe")
+	if gs == null:
+		return true
+	check(gs.has_method("set_last_result"), "GameState exposes set_last_result")
+	check(gs.has_method("clear_last_result"), "GameState exposes clear_last_result")
+	var mock := {
+		"event_id": "harbor_sprint",
+		"player_racer": "player",
+		"places": [
+			{"racer": "player", "time_s": 88.2, "place": 1},
+			{"racer": "ai_1", "time_s": 91.0, "place": 2},
+			{"racer": "ai_2", "time_s": 95.5, "place": 3},
+			{"racer": "ai_3", "time_s": 102.7, "place": 4},
+			{"racer": "ai_4", "time_s": 105.3, "place": 5},
+		],
+	}
+	gs.call("set_last_result", mock)
+	var packed = load("res://scenes/ui/results.tscn")
+	check(packed is PackedScene, "results.tscn loads as PackedScene for the unlock probe")
+	if not (packed is PackedScene):
+		gs.call("clear_last_result")
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var grid := instance.find_child("ResultsList", true, false) as VBoxContainer
+	check(grid != null, "results probe has a ResultsList")
+	if grid != null:
+		check(grid.get_child_count() == 5, "results list holds 5 rows (got %d)" % grid.get_child_count())
+		var player_rows := 0
+		for child in grid.get_children():
+			var row := child as Label
+			check(row != null, "results row %s is a Label" % str(child.name))
+			if row != null and row.text.contains("player"):
+				player_rows += 1
+				check(row.text.begins_with("▶ "), "player row carries the highlight marker")
+				check(row.text.contains("01:28.200"), "player row formats mm:ss.mmm (got %s)" % row.text)
+		check(player_rows == 1, "exactly one player row is highlighted (got %d)" % player_rows)
+	check((gs.get("unlocked_events") as Array).has("harbor_sprint"), "P1 records harbor_sprint in unlocked_events")
+	check((gs.get("unlocked_cars") as Array).has("coupe"), "P1 win grants coupe in unlocked_cars")
+	var loaded := SaveSystem.load_game()
+	var progress: Dictionary = loaded["progress"]
+	check((progress.get("unlocked_events", []) as Array).has("harbor_sprint"), "P1 persists harbor_sprint to disk")
+	check((progress.get("unlocked_cars", []) as Array).has("coupe"), "P1 persists coupe to disk")
+	var records: Dictionary = loaded["records"]
+	check(records.has("harbor_sprint"), "records hold a harbor_sprint entry")
+	if records.has("harbor_sprint"):
+		var entry: Dictionary = records["harbor_sprint"]
+		check(absf(float(entry.get("best_time_s", 0.0)) - 88.2) < 0.001, "records keep the winning time")
+		check(int(entry.get("best_position", 0)) == 1, "records keep the winning place")
+	var unlock := instance.find_child("UnlockBanner", true, false) as Label
+	check(unlock != null and unlock.visible == true, "UnlockBanner shows on a fresh unlock")
+	if unlock != null:
+		check(unlock.text.contains("NEW UNLOCK"), "UnlockBanner carries the NEW UNLOCK token")
+	var best := instance.find_child("BestBanner", true, false) as Label
+	check(best != null and best.visible == true, "BestBanner shows on a fresh best")
+	if best != null:
+		check(best.text.contains("NEW BEST"), "BestBanner carries the NEW BEST token")
+		check(best.text.contains("01:28.200"), "BestBanner formats mm:ss.mmm (got %s)" % best.text)
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	gs.call("clear_last_result")
+	check((gs.get("last_result") as Dictionary).is_empty(), "clear_last_result empties the handoff")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "results probe restores defaults")
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
 	return true
 
 func test_car_kit_glb_present() -> bool:
