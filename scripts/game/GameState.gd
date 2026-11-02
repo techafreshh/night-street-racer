@@ -9,6 +9,8 @@ extends Node
 ## (plus on flush()/exit) instead of writing per assignment, and
 ## select_event()/select_car()/select_color() are the typed writer APIs
 ## (menu.gd uses select_event, garage.gd uses select_car/select_color).
+## get_current_event()/get_selected_car()/get_default_car()/
+## get_selected_color()/get_last_result() are the typed reader APIs.
 ## Disk failures are silent no-ops so standalone instances never error
 ## headless.
 
