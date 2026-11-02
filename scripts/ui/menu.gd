@@ -30,8 +30,7 @@ func _ready() -> void:
 	print("MENU_READY")
 	if menu_mode == 1:
 		print("EVENT_SELECT_READY")
-		_build_event_grid()
-		_wire_select_mode()
+		_build_event_grid_async()
 	else:
 		_wire_main_mode()
 
@@ -121,31 +120,77 @@ func _on_back() -> void:
 	tree.change_scene_to_file("res://scenes/ui/main_menu.tscn")
 
 
-## Spawn one Button per EVENT_PATHS entry: "Event_<route_id>", disabled and
-## focus-skipped when locked, wired to _on_event_chosen when open.
-func _build_event_grid() -> void:
+## Async grid build: issues one threaded request per EVENT_PATHS entry so
+## _ready returns without parsing resources, then awaits completion off the
+## critical path. Falls back to a single-asset synchronous load() only when
+## a threaded load fails or times out; _on_event_chosen keeps its own
+## user-gesture load(). Emits EVENT_GRID_READY once the grid is complete.
+func _build_event_grid_async() -> void:
 	var grid := find_child("EventGrid", true, false) as GridContainer
 	if grid == null:
 		return
 	for path in EVENT_PATHS:
-		var ev := load(path) as RaceEvent
+		ResourceLoader.load_threaded_request(path)
+	var tree := get_tree()
+	if tree == null:
+		return
+	for _i in range(30):
+		await tree.process_frame
+		if not is_instance_valid(grid) or grid.is_queued_for_deletion():
+			return
+		tree = get_tree()
+		if tree == null:
+			return
+		var pending := false
+		for path in EVENT_PATHS:
+			var state := ResourceLoader.load_threaded_get_status(path)
+			if state != ResourceLoader.THREAD_LOAD_LOADED and state != ResourceLoader.THREAD_LOAD_FAILED and state != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+				pending = true
+				break
+		if not pending:
+			break
+	for path in EVENT_PATHS:
+		if not is_instance_valid(grid) or grid.is_queued_for_deletion():
+			return
+		var ev: RaceEvent = null
+		if ResourceLoader.load_threaded_get_status(path) == ResourceLoader.THREAD_LOAD_LOADED:
+			ev = ResourceLoader.load_threaded_get(path) as RaceEvent
+		if ev == null:
+			# Fallback for a failed, invalid, or timed-out threaded load.
+			ev = load(path) as RaceEvent
 		if ev == null:
 			continue
 		if not RaceEvent.validate(ev):
 			push_warning("MenuUI: skipping invalid event %s" % path)
 			continue
-		var btn := Button.new()
-		btn.name = "Event_%s" % ev.route_id
-		btn.custom_minimum_size = Vector2(320, 48)
-		var unlocked := MenuUI.is_unlocked(ev)
-		btn.text = "%s (%d laps, %d rivals)" % [ev.route_id, ev.laps, ev.opponents]
-		if unlocked:
-			btn.pressed.connect(_on_event_chosen.bind(ev.route_id))
-		else:
-			btn.text += " 🔒 Locked"
-			btn.disabled = true
-			btn.focus_mode = Control.FOCUS_NONE
-		grid.add_child(btn)
+		_add_event_button(grid, ev)
+	if not is_instance_valid(grid) or grid.is_queued_for_deletion():
+		return
+	_wire_select_mode()
+	print("EVENT_GRID_READY")
+
+
+## Compatibility shim: the grid now builds async off _ready; direct calls
+## fan out to the async builder and never block on asset I/O themselves.
+func _build_event_grid() -> void:
+	_build_event_grid_async()
+
+
+## Spawn one Button for ev: "Event_<route_id>", disabled and focus-skipped
+## when locked, wired to _on_event_chosen when open.
+func _add_event_button(grid: GridContainer, ev: RaceEvent) -> void:
+	var btn := Button.new()
+	btn.name = "Event_%s" % ev.route_id
+	btn.custom_minimum_size = Vector2(320, 48)
+	var unlocked := MenuUI.is_unlocked(ev)
+	btn.text = "%s (%d laps, %d rivals)" % [ev.route_id, ev.laps, ev.opponents]
+	if unlocked:
+		btn.pressed.connect(_on_event_chosen.bind(ev.route_id))
+	else:
+		btn.text += " 🔒 Locked"
+		btn.disabled = true
+		btn.focus_mode = Control.FOCUS_NONE
+	grid.add_child(btn)
 
 
 func _on_event_chosen(route_id: String) -> void:
