@@ -149,8 +149,8 @@ static func save_game(data: Dictionary) -> bool:
 ## keys still merge leniently over defaults; version stamp behavior unchanged).
 ## Records merge per-entry onto the default empty table: each raw entry is
 ## checked against the validate() predicates and corrupt entries are
-## discarded while valid entries (including unknown per-entry keys) carry
-## through verbatim via a deep duplicate.
+## discarded while valid entries are sanitized to best_time_s/best_position
+## only; unknown per-entry keys are discarded and note-only entries are dropped.
 ## A numeric future version carries through as int so validate() still
 ## detects the mismatch; a missing, non-numeric, equal, or older version
 ## normalizes to SAVE_VERSION.
@@ -209,7 +209,14 @@ static func load_game() -> Dictionary:
 					continue
 				if floor(float(best_position)) != float(best_position):
 					continue
-			merged_records[key] = (entry as Dictionary).duplicate(true)
+			var sanitized := {}
+			if record.has("best_time_s"):
+				sanitized["best_time_s"] = record["best_time_s"]
+			if record.has("best_position"):
+				sanitized["best_position"] = record["best_position"]
+			if sanitized.is_empty():
+				continue
+			merged_records[key] = sanitized
 	var raw_version: Variant = raw.get("version", SAVE_VERSION)
 	if (raw_version is int or raw_version is float) and int(raw_version) > SAVE_VERSION:
 		merged["version"] = int(raw_version)
