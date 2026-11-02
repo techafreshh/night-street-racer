@@ -30,9 +30,14 @@ static func _string_list(v: Variant) -> Array[String]:
 		return out
 	for item in (v as Array):
 		if item is String:
+			if (item as String).is_empty():
+				continue
 			out.append(item)
 		elif item is StringName:
-			out.append(String(item))
+			var folded := String(item)
+			if folded.is_empty():
+				continue
+			out.append(folded)
 	return out
 
 
