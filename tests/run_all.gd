@@ -4342,6 +4342,11 @@ func test_results_esc_goes_back() -> bool:
 		body = rest.substr(0, next) if next >= 0 else rest
 	check(not body.contains("quit"), "results Esc path never quits")
 	check(body.contains("_on_menu"), "results Esc routes through _on_menu")
+	check(body.contains("pause"), "results Esc still triggers on pause")
+	check(body.contains("ui_cancel"), "results Esc still triggers on ui_cancel")
+	check(not src.contains("quit"), "results.gd holds no quit() anywhere")
+	check(not src.contains("get_tree().quit()"), "results.gd holds no get_tree().quit()")
+	check(not src.contains("tree.quit()"), "results.gd holds no tree.quit()")
 	check(src.contains("main_menu.tscn"), "results Esc target stays main_menu.tscn")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "results Esc probe starts from defaults")
 	for action_name in [&"pause", &"ui_cancel"]:
