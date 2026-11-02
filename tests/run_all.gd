@@ -37,6 +37,7 @@ func _run_all() -> void:
 		"test_gamestate_rejects_nonint_color",
 		"test_save_system_drops_unknown_settings_keys",
 		"test_save_system_partial_settings_merge",
+		"test_save_system_records_per_entry_merge",
 		"test_save_system_preserves_unknown_top_level_keys",
 		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
@@ -400,6 +401,46 @@ func test_save_system_partial_settings_merge() -> bool:
 	for key: String in ["music_volume", "sfx_volume", "assists", "camera_shake"]:
 		check(loaded_settings.get(key) == default_settings.get(key), "partial merge fills default %s" % key)
 	check(SaveSystem.save_game(SaveSystem.default_data()), "partial settings probe restores defaults")
+	return true
+
+func test_save_system_records_per_entry_merge() -> bool:
+	var defaults := SaveSystem.default_data()
+	var raw := {
+		"version": SaveSystem.SAVE_VERSION,
+		"settings": (defaults["settings"] as Dictionary).duplicate(true),
+		"progress": (defaults["progress"] as Dictionary).duplicate(true),
+		"records": {
+			"harbor_sprint": {"best_time_s": 93.24, "best_position": 1, "note": "pb"},
+			"string_entry": "fast",
+			"empty_entry": {},
+			"bad_time_type": {"best_time_s": "fast", "best_position": 1},
+			"frac_position": {"best_time_s": 90.0, "best_position": 1.5},
+			"zero_time": {"best_time_s": 0.0, "best_position": 2},
+			"": {"best_time_s": 80.0, "best_position": 1},
+		},
+	}
+	var probe := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(probe != null, "save path opens for the records per-entry probe")
+	if probe != null:
+		probe.store_string(JSON.stringify(raw))
+		probe.close()
+	var loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(loaded), "mixed records load back valid")
+	var records: Dictionary = loaded["records"]
+	check(records.has("harbor_sprint"), "valid records entry survives a dirty load")
+	if records.has("harbor_sprint"):
+		var entry: Dictionary = records["harbor_sprint"]
+		check(float(entry.get("best_time_s", 0.0)) == 93.24, "per-entry merge keeps best_time_s")
+		check(int(entry.get("best_position", 0)) == 1, "per-entry merge keeps best_position")
+		check(str(entry.get("note", "")) == "pb", "per-entry merge keeps unknown per-entry keys")
+	check(not records.has("string_entry"), "corrupt String records entry is dropped")
+	check(not records.has("empty_entry"), "corrupt empty records entry is dropped")
+	check(not records.has("bad_time_type"), "corrupt best_time_s String entry is dropped")
+	check(not records.has("frac_position"), "corrupt fractional best_position entry is dropped")
+	check(not records.has("zero_time"), "corrupt zero best_time_s entry is dropped")
+	check(not records.has(""), "corrupt empty-key records entry is dropped")
+	check(records.size() == 1, "only the valid records entry survives")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "records per-entry probe restores defaults")
 	return true
 
 func test_save_system_drops_unknown_settings_keys() -> bool:
