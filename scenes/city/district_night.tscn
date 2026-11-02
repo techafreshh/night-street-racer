@@ -1,4 +1,4 @@
-[gd_scene load_steps=30 format=3]
+[gd_scene load_steps=31 format=3]
 
 [ext_resource type="Script" path="res://scripts/city/district_night.gd" id="1"]
 [ext_resource type="Texture2D" path="res://assets/city/night_sky.hdr" id="2"]
@@ -9,6 +9,7 @@
 [ext_resource type="PackedScene" path="res://assets/city/barrier.glb" id="7"]
 [ext_resource type="PackedScene" path="res://assets/city/street_prop.glb" id="8"]
 [ext_resource type="PackedScene" path="res://scenes/city/traffic_paths.tscn" id="9"]
+[ext_resource type="Script" path="res://scripts/fx/fx_pool.gd" id="10"]
 
 [sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_1"]
 panorama = ExtResource("2")
@@ -804,3 +805,6 @@ omni_range = 18.0
 position = Vector3(0, 1, 0)
 
 [node name="Traffic" parent="." instance=ExtResource("9")]
+
+[node name="FXPool" type="Node3D" parent="."]
+script = ExtResource("10")
