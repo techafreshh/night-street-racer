@@ -30,7 +30,7 @@ center_of_mass_mode = 1
 center_of_mass = Vector3(0, -0.35, 0)
 script = ExtResource("1")
 tune = ExtResource("4")
-drive_mode = 1
+drive_mode = 0
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
 position = Vector3(0, 0.25, 0)
@@ -95,4 +95,4 @@ script = ExtResource("3")
 
 [node name="CarPaint" type="Node" parent="."]
 script = ExtResource("6")
-body_color = Color(0.15, 0.35, 0.95, 1)
+color_index = 0

@@ -141,6 +141,7 @@ func apply_tune() -> void:
 	roll_stiffness_front = tune.roll_stiffness_front
 	roll_stiffness_rear = tune.roll_stiffness_rear
 	downforce_coefficient = tune.downforce_coefficient
+	drive_mode = clampi(tune.drivetrain, 0, 2) as DriveMode
 
 
 func reset_vehicle() -> void:

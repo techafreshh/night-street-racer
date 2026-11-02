@@ -22,6 +22,8 @@ const ROLL_STIFFNESS_MIN := 0.0
 const ROLL_STIFFNESS_MAX := 15000.0
 const DOWNFORCE_MIN := 0.0
 const DOWNFORCE_MAX := 3.0
+const DRIVETRAIN_MIN := 0
+const DRIVETRAIN_MAX := 2
 
 ## Fun range: 250.0 - 550.0 Nm peak engine torque.
 @export var engine_torque := 380.0
@@ -39,6 +41,8 @@ const DOWNFORCE_MAX := 3.0
 @export var roll_stiffness_rear := 6500.0
 ## Fun range: 0.0 - 3.0 N per (m/s)^2 central downforce coefficient.
 @export var downforce_coefficient := 1.2
+## Fun range: 0-2 drivetrain layout (0 FWD, 1 RWD, 2 AWD).
+@export var drivetrain := 1
 
 
 static func validate(tune: CarTune) -> bool:
@@ -65,5 +69,7 @@ static func validate(tune: CarTune) -> bool:
 	if tune.roll_stiffness_rear < ROLL_STIFFNESS_MIN or tune.roll_stiffness_rear > ROLL_STIFFNESS_MAX:
 		return false
 	if tune.downforce_coefficient < DOWNFORCE_MIN or tune.downforce_coefficient > DOWNFORCE_MAX:
+		return false
+	if tune.drivetrain < DRIVETRAIN_MIN or tune.drivetrain > DRIVETRAIN_MAX:
 		return false
 	return true
