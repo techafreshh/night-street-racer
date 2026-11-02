@@ -24,6 +24,7 @@ const SuiteRaceFlow = preload("res://tests/suites/test_race_flow.gd")
 const SuiteTimeTrial = preload("res://tests/suites/test_time_trial.gd")
 const SuiteDrift = preload("res://tests/suites/test_drift.gd")
 const SuiteAudio = preload("res://tests/suites/test_audio.gd")
+const SuiteFX = preload("res://tests/suites/test_fx.gd")
 
 var passed := 0
 var failed := 0
@@ -48,6 +49,7 @@ func _run_all() -> void:
 		SuiteTimeTrial.new(ctx),
 		SuiteDrift.new(ctx),
 		SuiteAudio.new(ctx),
+		SuiteFX.new(ctx),
 	]
 	for suite in suites:
 		for t: String in suite.get_test_names():

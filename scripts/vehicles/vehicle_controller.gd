@@ -83,6 +83,12 @@ var is_grounded := false
 ## Max per-wheel slip angle magnitude (radians) this tick; the audio
 ## mixer fades the skid loop in above 0.20 rad, handbrake slides count.
 var slip_intensity := 0.0
+## Per-wheel slip readout (radians, ramped by forward speed like the
+## lateral force); VehicleFX polls this for smoke/skid emission.
+var wheel_slips: Array[float] = [0.0, 0.0, 0.0, 0.0]
+## True while hard braking locks a driven wheel at speed (stall readout
+## for the FX smoke path); latched per physics tick like _reversing.
+var brake_lockup := false
 
 var _throttle := 0.0
 var _brake := 0.0
@@ -406,7 +412,9 @@ func _physics_process(delta: float) -> void:
 
 	var grounded := 0
 	var max_slip := 0.0
-	for w in _wheels:
+	brake_lockup = false
+	for wi in _wheels.size():
+		var w: Dictionary = _wheels[wi]
 		var ray: RayCast3D = w["node"]
 		ray.force_raycast_update()
 		var front: bool = w["front"]
@@ -429,6 +437,8 @@ func _physics_process(delta: float) -> void:
 		w["has_contact"] = has_contact
 		if not has_contact:
 			w["contact_r"] = Vector3.ZERO
+			if wi >= 0 and wi < wheel_slips.size():
+				wheel_slips[wi] = 0.0
 			continue
 		var susp := compute_suspension_force(comp, comp_vel, spring_rate, damper_bump, damper_rebound)
 
@@ -443,6 +453,10 @@ func _physics_process(delta: float) -> void:
 		var slip := atan2(l_speed, absf(f_speed) + 1.0)
 		max_slip = maxf(max_slip, absf(slip))
 		var ramp := clampf(absf(f_speed) / 2.0, 0.0, 1.0)
+		if wi >= 0 and wi < wheel_slips.size():
+			wheel_slips[wi] = absf(slip) * ramp
+		if _brake > 0.5 and absf(speed_ms) > 5.0 and _is_driven(front) and absf(f_speed) < 0.8:
+			brake_lockup = true
 
 		# Longitudinal: drive split per drive_mode, service brake on all
 		# wheels, handbrake lock on the rears.
