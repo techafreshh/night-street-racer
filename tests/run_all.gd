@@ -98,6 +98,7 @@ func _run_all() -> void:
 		"test_district_night_uses_kit",
 		"traffic_yields_when_blocked",
 		"traffic_loops_without_error",
+		"test_car_paint_clears_overrides_on_exit",
 		"ai_completes_loop_without_offroad",
 		"rubber_band_within_bounds",
 		"race_four_ai_finish",
@@ -2869,6 +2870,54 @@ func traffic_loops_without_error() -> bool:
 		check(absf(p.x) <= 140.0 and absf(p.z) <= 140.0, "loop car stays inside the district (%.1f, %.1f)" % [p.x, p.z])
 		check(p.y > 0.0 and p.y < 5.0, "loop car holds lane height (y %.2f)" % p.y)
 	paths.queue_free()
+	await process_frame
+	await physics_frame
+	return true
+
+func test_car_paint_clears_overrides_on_exit() -> bool:
+	var packed := load("res://scenes/vehicles/traffic_car.tscn") as PackedScene
+	check(packed != null, "traffic car scene loads for the paint override test")
+	if packed == null:
+		return true
+	var car := packed.instantiate() as Node
+	check(car != null, "paint test car instantiates")
+	if car == null:
+		return true
+	root.add_child(car)
+	await process_frame
+	var paint := car.get_node_or_null("CarPaint") as CarPaint
+	check(paint != null, "paint test car has a CarPaint node")
+	if paint == null:
+		car.queue_free()
+		await process_frame
+		await physics_frame
+		return true
+	var targets: Array[MeshInstance3D] = paint._target_meshes()
+	check(not targets.is_empty(), "paint test finds at least one painted mesh")
+	var painted_in_tree := false
+	for mesh_inst in targets:
+		if is_instance_valid(mesh_inst) and mesh_inst.mesh != null:
+			if mesh_inst.get_surface_override_material(0) != null:
+				painted_in_tree = true
+	check(painted_in_tree, "surface override present while car is in tree")
+	root.remove_child(car)
+	var cleared := true
+	for mesh_inst in targets:
+		if not is_instance_valid(mesh_inst) or mesh_inst.mesh == null:
+			continue
+		for i in mesh_inst.mesh.get_surface_count():
+			if mesh_inst.get_surface_override_material(i) != null:
+				cleared = false
+	check(cleared, "surface overrides cleared after tree exit")
+	root.add_child(car)
+	await process_frame
+	var repainted := false
+	for mesh_inst in targets:
+		if is_instance_valid(mesh_inst) and mesh_inst.mesh != null:
+			if mesh_inst.get_surface_override_material(0) != null:
+				repainted = true
+	check(repainted, "surface override restored on re-enter")
+	car.queue_free()
 	await process_frame
 	await physics_frame
 	return true
