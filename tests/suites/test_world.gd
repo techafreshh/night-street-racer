@@ -17,6 +17,9 @@ func get_test_names() -> Array[String]:
 		"test_player_input_bridge",
 		"test_export_presets_present",
 		"test_export_presets_targets",
+		"test_export_preset_names",
+		"test_traffic_cap",
+		"test_fx_pool_capped",
 		"test_tune_values_in_range",
 		"test_cornering_g_envelope_0_8_to_1_4g",
 		"test_light_budget_max_8_omnis_per_mesh",
@@ -231,14 +234,14 @@ func test_export_presets_present() -> bool:
 	for s: String in cfg.get_sections():
 		if s.begins_with("preset.") and s.get_slice_count(".") == 2:
 			pairs.append("%s|%s" % [str(cfg.get_value(s, "name", "")), str(cfg.get_value(s, "platform", ""))])
-	ctx.check(pairs.has("Windows Desktop|Windows Desktop"), "Windows Desktop preset on platform Windows Desktop exists")
+	ctx.check(pairs.has("Windows|Windows Desktop"), "Windows preset on platform Windows Desktop exists")
 	ctx.check(pairs.has("Linux|Linux"), "Linux preset on platform Linux exists")
 	return true
 
 func test_export_presets_targets() -> bool:
 	var cfg := ConfigFile.new()
 	ctx.check(cfg.load("res://export_presets.cfg") == OK, "export_presets.cfg loads for target checks")
-	var wanted := {"Windows Desktop": ".exe", "Linux": ".x86_64"}
+	var wanted := {"Windows": ".exe", "Linux": ".x86_64"}
 	var seen: Array[String] = []
 	for s: String in cfg.get_sections():
 		if not (s.begins_with("preset.") and s.get_slice_count(".") == 2):
@@ -253,8 +256,55 @@ func test_export_presets_targets() -> bool:
 		ctx.check(str(cfg.get_value(s + ".options", "binary_format/architecture", "")) == "x86_64", "%s targets x86_64" % preset_name)
 		ctx.check(cfg.get_value(s, "encrypt_pck", true) == false, "%s leaves pck unencrypted" % preset_name)
 		ctx.check(cfg.get_value(s, "dedicated_server", true) == false, "%s is not a dedicated-server preset" % preset_name)
-	ctx.check(seen.has("Windows Desktop"), "Windows Desktop preset present for target checks")
+	ctx.check(seen.has("Windows"), "Windows preset present for target checks")
 	ctx.check(seen.has("Linux"), "Linux preset present for target checks")
+	return true
+
+func test_export_preset_names() -> bool:
+	var cfg := ConfigFile.new()
+	ctx.check(cfg.load("res://export_presets.cfg") == OK, "export_presets.cfg parses for name checks")
+	var names: Array[String] = []
+	for s: String in cfg.get_sections():
+		if s.begins_with("preset.") and s.get_slice_count(".") == 2:
+			names.append(str(cfg.get_value(s, "name", "")))
+	ctx.check(names.has("Windows"), "preset named Windows exists")
+	ctx.check(names.has("Linux"), "preset named Linux exists")
+	ctx.check(not names.has("Windows Desktop"), "legacy Windows Desktop preset name is gone")
+	return true
+
+func test_traffic_cap() -> bool:
+	ctx.check(TrafficManager.TRAFFIC_COUNT <= 8, "traffic fleet capped at 8 (%d)" % TrafficManager.TRAFFIC_COUNT)
+	return true
+
+func test_fx_pool_capped() -> bool:
+	ctx.check(FXPool.MAX_FX <= 16, "FX pool capped at 16 emitters (%d)" % FXPool.MAX_FX)
+	ctx.check(FXPool.FX_AMOUNT <= 24, "FX emitter budget capped at 24 particles (%d)" % FXPool.FX_AMOUNT)
+	ctx.check(FXPool.next_index(0, 16) == 1, "FX round-robin advances the cursor")
+	ctx.check(FXPool.next_index(15, 16) == 0, "FX round-robin wraps at the cap")
+	ctx.check(FXPool.next_index(5, 0) == 0, "FX round-robin handles an empty pool")
+	var pool := FXPool.new()
+	ctx.check(pool != null, "FXPool instantiates freestanding")
+	ctx.tree.root.add_child(pool)
+	await ctx.tree.process_frame
+	var emitters := pool.find_children("*", "CPUParticles3D", true, false)
+	ctx.check(emitters.size() == FXPool.MAX_FX, "FX pool preallocates exactly MAX_FX emitters (%d)" % emitters.size())
+	for node in emitters:
+		var puff := node as CPUParticles3D
+		if puff == null:
+			continue
+		ctx.check(puff.one_shot == true, "pooled emitter %s is one-shot" % str(puff.name))
+		ctx.check(puff.amount <= 24, "pooled emitter %s holds the particle budget (%d)" % [str(puff.name), puff.amount])
+	var before := pool.get_child_count()
+	for i in 20:
+		pool.burst(Vector3(float(i), 1.0, 0.0), Color.WHITE)
+	ctx.check(pool.get_child_count() == before, "20 bursts never allocate (child count %d)" % pool.get_child_count())
+	ctx.check(pool.active_count() <= FXPool.MAX_FX, "active bursts stay within the cap (%d)" % pool.active_count())
+	var omnis := pool.find_children("*", "OmniLight3D", true, false)
+	var spots := pool.find_children("*", "SpotLight3D", true, false)
+	ctx.check(omnis.is_empty() and spots.is_empty(), "FX pool owns no lights")
+	ctx.tree.root.remove_child(pool)
+	pool.free()
+	await ctx.tree.process_frame
 	return true
 
 func test_tune_values_in_range() -> bool:
