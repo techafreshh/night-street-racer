@@ -202,3 +202,7 @@ func _on_event_chosen(route_id: String) -> void:
 	if gs != null:
 		gs.select_event(route_id)
 		print("EVENT_SELECTED %s" % route_id)
+	var tree := get_tree()
+	if tree == null:
+		return
+	tree.change_scene_to_file("res://scenes/ui/garage.tscn")

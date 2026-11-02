@@ -73,6 +73,7 @@ func _ready() -> void:
 	_resolve_selection()
 	_build_swatches()
 	_wire_back()
+	_wire_start()
 	_build_car_grid_async()
 
 
@@ -205,6 +206,29 @@ func _wire_back() -> void:
 	var back := find_child("BackButton", true, false) as BaseButton
 	if back != null:
 		back.pressed.connect(_on_back)
+
+
+func _wire_start() -> void:
+	var start := find_child("StartButton", true, false) as BaseButton
+	if start != null:
+		start.pressed.connect(_on_start_race)
+
+
+func _on_start_race() -> void:
+	var event_id := "harbor_sprint"
+	var gs := _game_state()
+	if gs != null:
+		var current := StringName(gs.get("current_event"))
+		if current != &"":
+			event_id = String(current)
+	var path := "res://scenes/races/race_%s.tscn" % event_id
+	if not ResourceLoader.exists(path):
+		path = "res://scenes/races/race_harbor_sprint.tscn"
+	print("RACE_START %s" % path.get_file().get_basename())
+	var tree := get_tree()
+	if tree == null:
+		return
+	tree.change_scene_to_file(path)
 
 
 ## Focus the first unlocked car so keyboard/gamepad can start at once.
