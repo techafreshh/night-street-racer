@@ -22,9 +22,6 @@ var _cached_best := -1.0
 var _player_car: VehicleController = null
 ## Accumulated drift points for the current run (banked to the HUD popup).
 var _drift_total := 0.0
-## Cached drift best for the current event, loaded once in _bind_race so
-## the per-frame drift sample never touches disk while RACING.
-var _cached_drift_best := 0
 ## Last whole-point total already pushed to the HUD popup.
 var _drift_last_shown := 0
 
@@ -196,7 +193,6 @@ func _bind_race() -> void:
 		if not _manager.race_finished.is_connected(_on_finished):
 			_manager.race_finished.connect(_on_finished)
 	_cached_best = TimeTrial.get_best(_event_id)
-	_cached_drift_best = DriftScoring.get_best(_event_id)
 	_drift_total = 0.0
 	_drift_last_shown = 0
 	var hud := get_node_or_null("HUD")
@@ -222,7 +218,6 @@ func _on_finished() -> void:
 		"places": table.ordered_results(),
 		"player_racer": "player",
 		"drift_score": int(_drift_total),
-		"drift_best": _cached_drift_best,
 	}
 	var gs := get_node_or_null("/root/GameState")
 	if gs != null and gs.has_method("set_last_result"):

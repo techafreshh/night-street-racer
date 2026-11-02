@@ -75,23 +75,6 @@ static func get_best(event_id: String) -> int:
 	return _best_from_table(records as Dictionary, event_id)
 
 
-## Single-read snapshot of every stored drift best ({event_id: score},
-## corrupt entries dropped) so the results screen renders banners from one
-## disk read instead of one get_best load per row.
-static func all_bests() -> Dictionary:
-	var out := {}
-	var data := SaveSystem.load_game()
-	var records: Variant = data.get("records", {})
-	if not (records is Dictionary):
-		return out
-	var table := records as Dictionary
-	for key in table.keys():
-		var best := _best_from_table(table, String(key))
-		if best > 0:
-			out[String(key)] = best
-	return out
-
-
 ## Persist score only when it beats the stored best (or no best exists).
 ## Returns false and writes nothing when event_id is empty, score <= 0, or
 ## an existing best_drift_score is already >= score. Merges into the stored
