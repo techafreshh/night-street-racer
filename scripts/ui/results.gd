@@ -65,10 +65,10 @@ func _format_time(seconds: float) -> String:
 func _resolve_result() -> void:
 	var fallback := _mock_result()
 	var gs := get_node_or_null("/root/GameState")
-	if gs == null:
+	if gs == null or not gs.has_method("get_last_result"):
 		_apply_dict(fallback)
 		return
-	var raw: Variant = gs.get("last_result")
+	var raw: Variant = gs.call("get_last_result")
 	if not (raw is Dictionary):
 		_apply_dict(fallback)
 		return

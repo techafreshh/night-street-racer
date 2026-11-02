@@ -25,6 +25,7 @@ func get_test_names() -> Array[String]:
 		"test_garage_color_persists",
 		"test_garage_grid_single_save_read",
 		"test_garage_grid_no_per_button_reads",
+		"garage_typed_selection_reads",
 	]
 	return names
 
@@ -688,4 +689,83 @@ func test_garage_grid_no_per_button_reads() -> bool:
 		var pure_next := pure_rest.find("\nstatic func ", 1)
 		var pure_body := pure_rest.substr(0, pure_next) if pure_next >= 0 else pure_rest
 		ctx.check(not pure_body.contains("load_game"), "is_car_unlocked_with evaluates with no disk read")
+	return true
+
+func garage_typed_selection_reads() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/garage.gd")
+	ctx.check(src != "", "garage.gd source loads for the typed-reads probe")
+	if src == "":
+		return true
+	ctx.check(src.contains("has_method(\"get_selected_car\")"), "garage guards the get_selected_car reader")
+	ctx.check(src.contains("gs.call(\"get_selected_car\")"), "garage routes the car read through get_selected_car")
+	ctx.check(src.contains("has_method(\"get_default_car\")"), "garage guards the get_default_car reader")
+	ctx.check(src.contains("gs.call(\"get_default_car\")"), "garage routes the default read through get_default_car")
+	ctx.check(src.contains("has_method(\"get_selected_color\")"), "garage guards the get_selected_color reader")
+	ctx.check(src.contains("gs.call(\"get_selected_color\")"), "garage routes the color read through get_selected_color")
+	ctx.check(src.contains("has_method(\"get_current_event\")"), "garage guards the get_current_event reader")
+	ctx.check(src.contains("gs.call(\"get_current_event\")"), "garage routes the event read through get_current_event")
+	ctx.check(not src.contains("gs.get(\"selected_car\")"), "garage keeps no stringly selected_car read")
+	ctx.check(not src.contains("gs.get(\"DEFAULT_CAR\")"), "garage keeps no stringly DEFAULT_CAR read")
+	ctx.check(not src.contains("gs.get(\"selected_color\")"), "garage keeps no stringly selected_color read")
+	ctx.check(not src.contains("gs.get(\"current_event\")"), "garage keeps no stringly current_event read")
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		ctx.check(gs_script != null, "GameState.gd loads for the garage typed-reads probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		ctx.tree.root.add_child(gs)
+		mounted = true
+		await ctx.tree.process_frame
+	ctx.check(gs != null, "GameState singleton is reachable for the garage typed-reads probe")
+	if gs == null:
+		return true
+	ctx.check(gs.has_method("get_selected_car"), "GameState exposes get_selected_car")
+	ctx.check(gs.has_method("get_selected_color"), "GameState exposes get_selected_color")
+	ctx.check(gs.has_method("get_current_event"), "GameState exposes get_current_event")
+	var prev_car := StringName(gs.get("selected_car"))
+	var prev_color := int(gs.get("selected_color"))
+	var prev_event := StringName(gs.get("current_event"))
+	gs.call("select_car", "hatch")
+	gs.call("select_color", 2)
+	gs.call("select_event", "neon_loop")
+	await ctx.tree.process_frame
+	ctx.check(StringName(gs.call("get_selected_car")) == &"hatch", "typed car writer flows to the typed reader")
+	ctx.check(int(gs.call("get_selected_color")) == 2, "typed color writer flows to the typed reader")
+	ctx.check(StringName(gs.call("get_current_event")) == &"neon_loop", "typed event writer flows to the typed reader")
+	var probe_node := GarageUI.new()
+	ctx.tree.root.add_child(probe_node)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	probe_node.call("_resolve_selection")
+	ctx.check(StringName(probe_node.get("_current_car")) == &"hatch", "resolver picks the hatch car (got %s)" % String(probe_node.get("_current_car")))
+	ctx.check(int(probe_node.get("_current_color")) == 2, "resolver picks color 2 (got %d)" % int(probe_node.get("_current_color")))
+	probe_node.call("_on_start_race")
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var swapped := ctx.tree.current_scene
+	ctx.check(swapped != null, "start-race navigation leaves the probe node")
+	if swapped != null:
+		ctx.check(String(swapped.get("scene_file_path")).contains("race_neon_loop"), "start-race resolves neon_loop (got %s)" % String(swapped.get("scene_file_path")))
+		if swapped != probe_node and is_instance_valid(swapped):
+			if swapped.get_parent() == ctx.tree.root:
+				ctx.tree.root.remove_child(swapped)
+			swapped.free()
+			await ctx.tree.process_frame
+	if is_instance_valid(probe_node):
+		if probe_node.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(probe_node)
+		probe_node.free()
+		await ctx.tree.process_frame
+	gs.set("selected_car", prev_car)
+	gs.set("selected_color", prev_color)
+	gs.set("current_event", prev_event)
+	await ctx.tree.process_frame
+	if mounted:
+		ctx.tree.root.remove_child(gs)
+		gs.free()
+		await ctx.tree.process_frame
 	return true

@@ -94,12 +94,21 @@ func _resolve_selection() -> void:
 	var car := &"sedan"
 	var color := 0
 	if gs != null:
-		var saved := StringName(gs.get("selected_car"))
+		var saved := &""
+		if gs.has_method("get_selected_car"):
+			saved = StringName(gs.call("get_selected_car"))
 		if CAR_IDS.has(String(saved)):
 			car = saved
-		elif StringName(gs.get("DEFAULT_CAR")) != &"" and CAR_IDS.has(String(StringName(gs.get("DEFAULT_CAR")))):
-			car = StringName(gs.get("DEFAULT_CAR"))
-		color = int(gs.get("selected_color"))
+		else:
+			var fallback := &""
+			if gs.has_method("get_default_car"):
+				fallback = StringName(gs.call("get_default_car"))
+			if fallback != &"" and CAR_IDS.has(String(fallback)):
+				car = fallback
+		var raw_color := 0
+		if gs.has_method("get_selected_color"):
+			raw_color = int(gs.call("get_selected_color"))
+		color = raw_color
 	_current_car = car
 	_current_color = posmod(color, CarPaint.COLORS.size())
 
@@ -218,7 +227,9 @@ func _on_start_race() -> void:
 	var event_id := "harbor_sprint"
 	var gs := _game_state()
 	if gs != null:
-		var current := StringName(gs.get("current_event"))
+		var current := &""
+		if gs.has_method("get_current_event"):
+			current = StringName(gs.call("get_current_event"))
 		if current != &"":
 			event_id = String(current)
 	var path := "res://scenes/races/race_%s.tscn" % event_id
