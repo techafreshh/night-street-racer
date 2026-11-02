@@ -50,8 +50,10 @@ static func default_data() -> Dictionary:
 ## Strict shape check: version must be strictly int and equal SAVE_VERSION
 ## (bool/float/String rejected; lenient float handling lives in
 ## load_game(), not here), the progress
-## selected_car/current_event keys must be strings and selected_color must be
-## numeric (int or float; float covers JSON round-trip coercion). Settings must
+## selected_car/current_event keys must be strings, selected_color must be
+## numeric (int or float; float covers JSON round-trip coercion), and
+## unlocked_events/unlocked_cars must each be present as an Array holding
+## only non-empty Strings (empty arrays are valid defaults). Settings must
 ## hold exactly the five default_data() keys with the three volumes numeric
 ## within VOLUME_MIN/VOLUME_MAX and assists/camera_shake strictly bool;
 ## unknown settings keys are rejected (lenient dropping still lives in
@@ -126,6 +128,15 @@ static func validate(data: Dictionary) -> bool:
 	var color: Variant = (progress as Dictionary).get("selected_color")
 	if not (color is int or color is float):
 		return false
+	for key: String in ["unlocked_events", "unlocked_cars"]:
+		var unlocks: Variant = (progress as Dictionary).get(key)
+		if not (unlocks is Array):
+			return false
+		for entry: Variant in (unlocks as Array):
+			if not (entry is String):
+				return false
+			if (entry as String).is_empty():
+				return false
 	return true
 
 

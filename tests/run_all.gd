@@ -259,6 +259,30 @@ func test_save_system_roundtrip() -> bool:
 	var missing_color := SaveSystem.default_data()
 	(missing_color["progress"] as Dictionary).erase("selected_color")
 	check(not SaveSystem.validate(missing_color), "missing selected_color fails SaveSystem.validate()")
+	var unlock_defaults := SaveSystem.default_data()
+	check(SaveSystem.validate(unlock_defaults), "default empty unlock lists validate")
+	var unlock_good := SaveSystem.default_data()
+	(unlock_good["progress"] as Dictionary)["unlocked_events"] = ["harbor_sprint"]
+	(unlock_good["progress"] as Dictionary)["unlocked_cars"] = ["coupe"]
+	check(SaveSystem.validate(unlock_good), "populated unlock lists validate")
+	var unlock_missing_events := SaveSystem.default_data()
+	(unlock_missing_events["progress"] as Dictionary).erase("unlocked_events")
+	check(not SaveSystem.validate(unlock_missing_events), "missing unlocked_events fails SaveSystem.validate()")
+	var unlock_missing_cars := SaveSystem.default_data()
+	(unlock_missing_cars["progress"] as Dictionary).erase("unlocked_cars")
+	check(not SaveSystem.validate(unlock_missing_cars), "missing unlocked_cars fails SaveSystem.validate()")
+	var unlock_string := SaveSystem.default_data()
+	(unlock_string["progress"] as Dictionary)["unlocked_events"] = "harbor_sprint"
+	check(not SaveSystem.validate(unlock_string), "String unlocked_events fails SaveSystem.validate()")
+	var unlock_dict := SaveSystem.default_data()
+	(unlock_dict["progress"] as Dictionary)["unlocked_cars"] = {}
+	check(not SaveSystem.validate(unlock_dict), "Dictionary unlocked_cars fails SaveSystem.validate()")
+	var unlock_int_entry := SaveSystem.default_data()
+	(unlock_int_entry["progress"] as Dictionary)["unlocked_events"] = ["harbor_sprint", 42]
+	check(not SaveSystem.validate(unlock_int_entry), "int unlock entry fails SaveSystem.validate()")
+	var unlock_empty_entry := SaveSystem.default_data()
+	(unlock_empty_entry["progress"] as Dictionary)["unlocked_cars"] = [""]
+	check(not SaveSystem.validate(unlock_empty_entry), "empty-String unlock entry fails SaveSystem.validate()")
 	var default_settings := SaveSystem.default_data()
 	check(SaveSystem.validate(default_settings), "default settings validate")
 	var bad_volume := SaveSystem.default_data()
