@@ -568,9 +568,17 @@ func test_event_press_writes_current_event() -> bool:
 	var detached := MenuUI.new()
 	check(detached != null, "detached MenuUI instantiates")
 	if detached != null:
+		root.add_child(detached)
+		await process_frame
+		await process_frame
+		gs.set("current_event", &"")
 		detached._on_event_chosen(String(resolved))
-		check(true, "detached _on_event_chosen completes without error")
+		await process_frame
+		check(StringName(gs.get("current_event")) == resolved, "detached _on_event_chosen writes current_event %s" % String(resolved))
+		gs.set("current_event", prev)
+		root.remove_child(detached)
 		detached.free()
+		await process_frame
 	return true
 
 func test_event_select_grid_skips_invalid() -> bool:
