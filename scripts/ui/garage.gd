@@ -43,6 +43,7 @@ const TURNTABLE_SPEED := 0.8
 var _current_car := &"sedan"
 var _current_color := 0
 var _pivot: Node3D = null
+var _tunes: Dictionary = {}
 
 
 ## Placeholder lock rule: the default car is always open; the rest unlock
@@ -70,11 +71,9 @@ static func mode_label(drivetrain: int) -> String:
 func _ready() -> void:
 	print("GARAGE_READY")
 	_resolve_selection()
-	_build_car_grid()
 	_build_swatches()
 	_wire_back()
-	_show_car(_current_car)
-	_focus_first()
+	_build_car_grid_async()
 
 
 func _process(delta: float) -> void:
@@ -109,37 +108,85 @@ func _resolve_selection() -> void:
 	_current_color = posmod(color, CarPaint.COLORS.size())
 
 
-## Spawn one Button per CAR_IDS entry: "Car_<id>", wired to _on_car_chosen
-## when unlocked, disabled and focus-skipped when locked.
-func _build_car_grid() -> void:
+## Async grid build: issues one threaded request per CAR_TUNES entry so
+## _ready returns without parsing resources, then awaits completion off the
+## critical path. Falls back to a single-asset synchronous load() only when
+## a threaded load fails or times out. Emits GARAGE_GRID_READY once the
+## grid is complete.
+func _build_car_grid_async() -> void:
 	var grid := find_child("CarGrid", true, false) as GridContainer
 	if grid == null:
 		return
 	for car_id in CAR_IDS:
-		var tune := load(str(CAR_TUNES[car_id])) as CarTune
+		ResourceLoader.load_threaded_request(str(CAR_TUNES[car_id]))
+	var tree := get_tree()
+	if tree == null:
+		return
+	for _i in range(30):
+		await tree.process_frame
+		if not is_instance_valid(grid) or grid.is_queued_for_deletion():
+			return
+		tree = get_tree()
+		if tree == null:
+			return
+		var pending := false
+		for car_id in CAR_IDS:
+			var state := ResourceLoader.load_threaded_get_status(str(CAR_TUNES[car_id]))
+			if state != ResourceLoader.THREAD_LOAD_LOADED and state != ResourceLoader.THREAD_LOAD_FAILED and state != ResourceLoader.THREAD_LOAD_INVALID_RESOURCE:
+				pending = true
+				break
+		if not pending:
+			break
+	for car_id in CAR_IDS:
+		if not is_instance_valid(grid) or grid.is_queued_for_deletion():
+			return
+		var tune: CarTune = null
+		if ResourceLoader.load_threaded_get_status(str(CAR_TUNES[car_id])) == ResourceLoader.THREAD_LOAD_LOADED:
+			tune = ResourceLoader.load_threaded_get(str(CAR_TUNES[car_id])) as CarTune
+		if tune == null:
+			# Fallback for a failed, invalid, or timed-out threaded load.
+			tune = load(str(CAR_TUNES[car_id])) as CarTune
 		if tune == null:
 			continue
 		if not CarTune.validate(tune):
 			push_warning("GarageUI: skipping invalid tune %s" % str(CAR_TUNES[car_id]))
 			continue
-		var btn := Button.new()
-		btn.name = "Car_%s" % car_id
-		btn.custom_minimum_size = Vector2(320, 48)
-		btn.text = "%s (%d Nm, %.2f/%.2f, %s)" % [
-			str(CAR_NAMES[car_id]),
-			int(tune.engine_torque),
-			tune.tire_grip_front,
-			tune.tire_grip_rear,
-			mode_label(tune.drivetrain),
-		]
-		var unlocked := GarageUI.is_car_unlocked(car_id)
-		if unlocked:
-			btn.pressed.connect(_on_car_chosen.bind(car_id))
-		else:
-			btn.text += " 🔒 Locked"
-			btn.disabled = true
-			btn.focus_mode = Control.FOCUS_NONE
-		grid.add_child(btn)
+		_tunes[car_id] = tune
+		_add_car_button(grid, car_id, tune)
+	if not is_instance_valid(grid) or grid.is_queued_for_deletion():
+		return
+	_show_car(_current_car)
+	_focus_first()
+	print("GARAGE_GRID_READY")
+
+
+## Compatibility shim: the grid now builds async off _ready; direct calls
+## fan out to the async builder and never block on asset I/O themselves.
+func _build_car_grid() -> void:
+	_build_car_grid_async()
+
+
+## Spawn one Button for car_id: "Car_<id>", wired to _on_car_chosen
+## when unlocked, disabled and focus-skipped when locked.
+func _add_car_button(grid: GridContainer, car_id: String, tune: CarTune) -> void:
+	var btn := Button.new()
+	btn.name = "Car_%s" % car_id
+	btn.custom_minimum_size = Vector2(320, 48)
+	btn.text = "%s (%d Nm, %.2f/%.2f, %s)" % [
+		str(CAR_NAMES[car_id]),
+		int(tune.engine_torque),
+		tune.tire_grip_front,
+		tune.tire_grip_rear,
+		mode_label(tune.drivetrain),
+	]
+	var unlocked := GarageUI.is_car_unlocked(car_id)
+	if unlocked:
+		btn.pressed.connect(_on_car_chosen.bind(car_id))
+	else:
+		btn.text += " 🔒 Locked"
+		btn.disabled = true
+		btn.focus_mode = Control.FOCUS_NONE
+	grid.add_child(btn)
 
 
 ## Wire the four static Color0..Color3 buttons to _on_color_chosen.
@@ -245,7 +292,9 @@ func _update_info() -> void:
 	var info := find_child("CarInfo", true, false) as Label
 	if info == null:
 		return
-	var tune := load(str(CAR_TUNES.get(String(_current_car), ""))) as CarTune
+	var tune := _tunes.get(String(_current_car)) as CarTune
+	if tune == null:
+		tune = load(str(CAR_TUNES.get(String(_current_car), ""))) as CarTune
 	if tune == null:
 		info.text = "%s" % str(CAR_NAMES.get(String(_current_car), String(_current_car)))
 		return
