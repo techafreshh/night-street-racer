@@ -55,6 +55,7 @@ func _run_all() -> void:
 		"test_garage_writes_via_typed_api",
 		"test_garage_scene_loads",
 		"test_garage_car_grid",
+		"test_garage_unlock_corrupt",
 		"test_garage_color_persists",
 		"test_event_select_grid",
 		"test_event_grid_async_defers_work",
@@ -1140,6 +1141,34 @@ func test_garage_car_grid() -> bool:
 		root.remove_child(gs)
 		gs.free()
 		await process_frame
+	return true
+
+func test_garage_unlock_corrupt() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "corrupt unlock probe starts from defaults")
+	var corrupt_shapes: Array = ["coupe", {"coupe": true}, 42, null]
+	for shape in corrupt_shapes:
+		var doc := SaveSystem.load_game()
+		var progress: Dictionary = doc.get("progress", {})
+		progress["unlocked_cars"] = shape
+		doc["progress"] = progress
+		check(SaveSystem.save_game(doc), "corrupt shape %s saves" % str(shape))
+		check(GarageUI.is_car_unlocked("sedan"), "sedan stays unlocked on corrupt %s" % str(shape))
+		check(not GarageUI.is_car_unlocked("coupe"), "coupe stays locked on corrupt %s" % str(shape))
+	var mixed := SaveSystem.load_game()
+	var mixed_progress: Dictionary = mixed.get("progress", {})
+	mixed_progress["unlocked_cars"] = ["coupe", 42, ""]
+	mixed["progress"] = mixed_progress
+	check(SaveSystem.save_game(mixed), "mixed unlock list saves")
+	check(GarageUI.is_car_unlocked("sedan"), "sedan stays unlocked on mixed list")
+	check(GarageUI.is_car_unlocked("coupe"), "mixed list partially honors the valid coupe grant")
+	check(not GarageUI.is_car_unlocked("hatch"), "mixed list leaves ungranted hatch locked")
+	var grant := SaveSystem.load_game()
+	var grant_progress: Dictionary = grant.get("progress", {})
+	grant_progress["unlocked_cars"] = ["coupe"]
+	grant["progress"] = grant_progress
+	check(SaveSystem.save_game(grant), "valid grant saves")
+	check(GarageUI.is_car_unlocked("coupe"), "valid grant opens coupe")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "corrupt unlock probe restores defaults")
 	return true
 
 func test_garage_color_persists() -> bool:
