@@ -50,8 +50,10 @@ static func default_data() -> Dictionary:
 ## load_game(), not here), the progress
 ## selected_car/current_event keys must be strings and selected_color must be
 ## numeric (int or float; float covers JSON round-trip coercion). Settings must
-## hold all five default_data() keys with the three volumes numeric within
-## VOLUME_MIN/VOLUME_MAX and assists/camera_shake strictly bool. Records may
+## hold exactly the five default_data() keys with the three volumes numeric
+## within VOLUME_MIN/VOLUME_MAX and assists/camera_shake strictly bool;
+## unknown settings keys are rejected (lenient dropping still lives in
+## load_game(), not here). Records may
 ## be empty; each entry key must be a non-empty String holding a non-empty
 ## Dictionary whose present best_time_s/best_position keys are numeric-positive
 ## / int-or-whole-float-positive (whole float covers JSON round-trip coercion:
@@ -71,6 +73,9 @@ static func validate(data: Dictionary) -> bool:
 	var settings_dict: Dictionary = settings
 	for key: String in ["master_volume", "music_volume", "sfx_volume", "assists", "camera_shake"]:
 		if not settings_dict.has(key):
+			return false
+	for key: Variant in settings_dict.keys():
+		if not (key in ["master_volume", "music_volume", "sfx_volume", "assists", "camera_shake"]):
 			return false
 	for key: String in ["master_volume", "music_volume", "sfx_volume"]:
 		var volume: Variant = settings_dict.get(key)
