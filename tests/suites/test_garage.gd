@@ -23,6 +23,8 @@ func get_test_names() -> Array[String]:
 		"test_garage_grid_async_completes",
 		"test_garage_unlock_corrupt",
 		"test_garage_color_persists",
+		"test_garage_grid_single_save_read",
+		"test_garage_grid_no_per_button_reads",
 	]
 	return names
 
@@ -591,4 +593,99 @@ func test_garage_color_persists() -> bool:
 		ctx.tree.root.remove_child(gs)
 		gs.free()
 		await ctx.tree.process_frame
+	return true
+
+func test_garage_grid_single_save_read() -> bool:
+	var seed := SaveSystem.default_data()
+	(seed["progress"] as Dictionary)["unlocked_cars"] = ["coupe"]
+	ctx.check(SaveSystem.save_game(seed), "single-read probe seeds a coupe grant")
+	var unlocked := Progression.unlocked_cars()
+	ctx.check((unlocked as Array) == ["coupe"], "one car snapshot holds the seeded grant")
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		ctx.check(gs_script != null, "GameState.gd loads for the single-read probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		ctx.tree.root.add_child(gs)
+		mounted = true
+	gs.set("selected_car", &"")
+	gs.set("selected_color", 0)
+	var packed = load("res://scenes/ui/garage.tscn")
+	ctx.check(packed is PackedScene, "garage.tscn loads as PackedScene for the single-read probe")
+	if not (packed is PackedScene):
+		if mounted:
+			ctx.tree.root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	var grid := instance.find_child("CarGrid", true, false) as GridContainer
+	ctx.check(grid != null, "single-read probe has a CarGrid")
+	if grid != null:
+		for _i in 60:
+			if grid.get_child_count() >= 4:
+				break
+			await ctx.tree.process_frame
+		ctx.check(grid.get_child_count() == 4, "grid builds all 4 car buttons from the seeded save (got %d)" % grid.get_child_count())
+		for stem in ["sedan", "coupe", "hatch", "awd"]:
+			var want_open := Progression.is_car_unlocked_with(stem, unlocked)
+			ctx.check(GarageUI.is_car_unlocked(stem) == want_open, "%s snapshot parity with the legacy shim" % stem)
+			var btn := instance.find_child("Car_" + stem, true, false) as Button
+			ctx.check(btn != null, "seeded grid has a button for %s" % stem)
+			if btn == null:
+				continue
+			ctx.check(btn.disabled == (not want_open), "%s disabled matches the snapshot lock" % stem)
+			if want_open:
+				ctx.check(not btn.text.contains("Locked"), "%s open button carries no lock suffix" % stem)
+				ctx.check(btn.focus_mode != Control.FOCUS_NONE, "%s open button stays focusable" % stem)
+			else:
+				ctx.check(btn.text.contains("Locked"), "%s locked button carries the lock suffix" % stem)
+				ctx.check(btn.focus_mode == Control.FOCUS_NONE, "%s locked button skips focus" % stem)
+		var coupe := instance.find_child("Car_coupe", true, false) as BaseButton
+		ctx.check(coupe != null and not coupe.disabled, "seeded coupe grant stays enabled")
+	ctx.tree.root.remove_child(instance)
+	instance.free()
+	await ctx.tree.process_frame
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "single-read probe restores defaults")
+	if mounted:
+		ctx.tree.root.remove_child(gs)
+		gs.free()
+		await ctx.tree.process_frame
+	return true
+
+func test_garage_grid_no_per_button_reads() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/garage.gd")
+	ctx.check(src != "", "garage.gd source loads for the no-per-button-read probe")
+	if src == "":
+		return true
+	var btn_start := src.find("func _add_car_button")
+	ctx.check(btn_start >= 0, "garage.gd keeps _add_car_button")
+	if btn_start >= 0:
+		var btn_rest := src.substr(btn_start)
+		var btn_next := btn_rest.find("\nfunc ", 1)
+		var btn_body := btn_rest.substr(0, btn_next) if btn_next >= 0 else btn_rest
+		for banned in ["load_game", "is_car_unlocked(", "unlocked_cars()"]:
+			ctx.check(not btn_body.contains(banned), "_add_car_button performs no %s (builder snapshots once)" % banned)
+	var async_start := src.find("func _build_car_grid_async")
+	ctx.check(async_start >= 0, "garage.gd keeps _build_car_grid_async")
+	if async_start >= 0:
+		var async_rest := src.substr(async_start)
+		var async_next := async_rest.find("\nfunc ", 1)
+		var async_body := async_rest.substr(0, async_next) if async_next >= 0 else async_rest
+		ctx.check(async_body.contains("Progression.unlocked_cars()"), "async builder snapshots car unlocks once")
+		ctx.check(async_body.contains("is_car_unlocked_with"), "async builder evaluates locks from the snapshot")
+		ctx.check(async_body.contains("GARAGE_GRID_READY"), "async builder still prints GARAGE_GRID_READY")
+	var prog := FileAccess.get_file_as_string("res://scripts/game/progression.gd")
+	ctx.check(prog.contains("func unlocked_cars"), "progression.gd exposes the car snapshot")
+	ctx.check(prog.contains("func is_car_unlocked_with"), "progression.gd exposes the pure car predicate")
+	var pure_start := prog.find("func is_car_unlocked_with")
+	if pure_start >= 0:
+		var pure_rest := prog.substr(pure_start)
+		var pure_next := pure_rest.find("\nstatic func ", 1)
+		var pure_body := pure_rest.substr(0, pure_next) if pure_next >= 0 else pure_rest
+		ctx.check(not pure_body.contains("load_game"), "is_car_unlocked_with evaluates with no disk read")
 	return true

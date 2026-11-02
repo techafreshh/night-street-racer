@@ -51,6 +51,15 @@ static func unlocked_events() -> Array[String]:
 	var progress: Dictionary = data.get("progress", {})
 	return _string_list(progress.get("unlocked_events", []))
 
+## Single-read snapshot of the unlocked car grants (issue #174): the garage
+## grid builds one Button per car, so it snapshots once and evaluates
+## every button with the disk-free is_car_unlocked_with instead of
+## re-reading the save file per button.
+static func unlocked_cars() -> Array[String]:
+	var data := SaveSystem.load_game()
+	var progress: Dictionary = data.get("progress", {})
+	return _string_list(progress.get("unlocked_cars", []))
+
 ## Disk-free lock rule over a snapshot from unlocked_events(): null never
 ## opens, an empty unlock_req is open from the start, otherwise the
 ## requirement must sit in the snapshot.
@@ -70,6 +79,16 @@ static func is_event_unlocked(ev: RaceEvent) -> bool:
 	if ev.unlock_req == &"":
 		return true
 	return is_unlocked_with(ev, unlocked_events())
+
+
+## Disk-free car lock rule over a snapshot from unlocked_cars()
+## (issue #174): sedan is always open, otherwise the car must sit in
+## the snapshot. Corrupt/mixed lists behave as today because the
+## snapshot already passed through _string_list.
+static func is_car_unlocked_with(car_id: String, unlocked: Array[String]) -> bool:
+	if StringName(car_id) == StringName("sedan"):
+		return true
+	return unlocked.has(car_id)
 
 
 ## Next rung after event_id, or "" when unknown or already last.

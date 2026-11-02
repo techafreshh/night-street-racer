@@ -46,15 +46,10 @@ var _pivot: Node3D = null
 var _tunes: Dictionary = {}
 
 
-## Placeholder lock rule: the default car is always open; the rest unlock
-## via SaveSystem progress.unlocked_cars (empty list means sedan only).
+## Legacy save-backed entry point (issue #174): delegates to the
+## Progression snapshot helpers so direct callers keep exact behavior.
 static func is_car_unlocked(car_id: String) -> bool:
-	if StringName(car_id) == StringName("sedan"):
-		return true
-	var data := SaveSystem.load_game()
-	var progress: Dictionary = data.get("progress", {})
-	var unlocked := Progression._string_list(progress.get("unlocked_cars", []))
-	return unlocked.has(car_id)
+	return Progression.is_car_unlocked_with(car_id, Progression.unlocked_cars())
 
 
 ## Drive-mode suffix for the stat line (0 FWD, 1 RWD, 2 AWD).
@@ -138,6 +133,10 @@ func _build_car_grid_async() -> void:
 				break
 		if not pending:
 			break
+	# One disk read for the whole grid (issue #174): every button below
+	# evaluates lock state from this snapshot instead of re-reading the
+	# save file per button.
+	var unlocked := Progression.unlocked_cars()
 	for car_id in CAR_IDS:
 		if not is_instance_valid(grid) or grid.is_queued_for_deletion():
 			return
@@ -153,7 +152,7 @@ func _build_car_grid_async() -> void:
 			push_warning("GarageUI: skipping invalid tune %s" % str(CAR_TUNES[car_id]))
 			continue
 		_tunes[car_id] = tune
-		_add_car_button(grid, car_id, tune)
+		_add_car_button(grid, car_id, tune, Progression.is_car_unlocked_with(car_id, unlocked))
 	if not is_instance_valid(grid) or grid.is_queued_for_deletion():
 		return
 	_show_car(_current_car)
@@ -168,8 +167,10 @@ func _build_car_grid() -> void:
 
 
 ## Spawn one Button for car_id: "Car_<id>", wired to _on_car_chosen
-## when unlocked, disabled and focus-skipped when locked.
-func _add_car_button(grid: GridContainer, car_id: String, tune: CarTune) -> void:
+## when unlocked, disabled and focus-skipped when locked. Pure button
+## builder (issue #174): lock state arrives precomputed from the grid
+## builder's single save snapshot, so this function performs no disk I/O.
+func _add_car_button(grid: GridContainer, car_id: String, tune: CarTune, unlocked: bool) -> void:
 	var btn := Button.new()
 	btn.name = "Car_%s" % car_id
 	btn.custom_minimum_size = Vector2(320, 48)
@@ -180,7 +181,6 @@ func _add_car_button(grid: GridContainer, car_id: String, tune: CarTune) -> void
 		tune.tire_grip_rear,
 		mode_label(tune.drivetrain),
 	]
-	var unlocked := GarageUI.is_car_unlocked(car_id)
 	if unlocked:
 		btn.pressed.connect(_on_car_chosen.bind(car_id))
 	else:
