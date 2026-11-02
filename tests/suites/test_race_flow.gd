@@ -39,6 +39,7 @@ func get_test_names() -> Array[String]:
 		"test_event_to_garage_flow",
 		"test_menu_esc_never_quits",
 		"test_garage_esc_goes_back",
+		"race_typed_selection_reads",
 	]
 	return names
 
@@ -1361,4 +1362,93 @@ func test_garage_esc_goes_back() -> bool:
 			instance.free()
 			await ctx.tree.process_frame
 	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "garage Esc probe restores defaults")
+	return true
+
+func race_typed_selection_reads() -> bool:
+	var race_src := FileAccess.get_file_as_string("res://scripts/race/race.gd")
+	ctx.check(race_src != "", "race.gd source loads for the typed-reads check")
+	ctx.check(race_src.contains("has_method(\"get_current_event\")"), "race guards the get_current_event reader before calling it")
+	ctx.check(race_src.contains("gs.call(\"get_current_event\")"), "race routes the event read through get_current_event")
+	ctx.check(race_src.contains("has_method(\"get_selected_car\")"), "race guards the get_selected_car reader before calling it")
+	ctx.check(race_src.contains("gs.call(\"get_selected_car\")"), "race routes the car read through get_selected_car")
+	ctx.check(race_src.contains("has_method(\"get_default_car\")"), "race guards the get_default_car reader before calling it")
+	ctx.check(race_src.contains("gs.call(\"get_default_car\")"), "race routes the default read through get_default_car")
+	ctx.check(not race_src.contains("gs.get(\"current_event\")"), "race keeps no stringly current_event read")
+	ctx.check(not race_src.contains("gs.get(\"selected_car\")"), "race keeps no stringly selected_car read")
+	ctx.check(not race_src.contains("gs.get(\"DEFAULT_CAR\")"), "race keeps no stringly DEFAULT_CAR read")
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		ctx.check(gs_script != null, "GameState.gd loads for the typed-reads probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		ctx.tree.root.add_child(gs)
+		mounted = true
+		await ctx.tree.process_frame
+	ctx.check(gs != null, "GameState singleton is reachable for the typed-reads probe")
+	if gs == null:
+		return true
+	var prev_event := StringName(gs.call("get_current_event")) if gs.has_method("get_current_event") else StringName(gs.get("current_event"))
+	var prev_car := StringName(gs.call("get_selected_car")) if gs.has_method("get_selected_car") else StringName(gs.get("selected_car"))
+	gs.call("select_event", "neon_loop")
+	gs.call("select_car", "hatch")
+	var race_script = load("res://scripts/race/race.gd")
+	ctx.check(race_script != null, "race.gd loads for the typed-reads probe")
+	if race_script == null:
+		gs.call("select_event", String(prev_event))
+		gs.call("select_car", String(prev_car))
+		if mounted:
+			ctx.tree.root.remove_child(gs)
+			gs.free()
+		return true
+	var race = race_script.new()
+	ctx.tree.root.add_child(race)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(String(race.get("_event_id")) == "neon_loop", "typed event writer flows through the resolver (got %s)" % String(race.get("_event_id")))
+	ctx.check(String(race.call("_resolve_car_id")) == "hatch", "typed car writer flows through the resolver (got %s)" % String(race.call("_resolve_car_id")))
+	ctx.tree.root.remove_child(race)
+	race.free()
+	await ctx.tree.process_frame
+	gs.call("select_event", "")
+	gs.call("select_car", "")
+	if gs.has_method("flush"):
+		gs.call("flush")
+	var fallback_race = race_script.new()
+	ctx.tree.root.add_child(fallback_race)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(String(fallback_race.get("_event_id")) == "harbor_sprint", "empty event falls back to harbor_sprint (got %s)" % String(fallback_race.get("_event_id")))
+	ctx.check(String(fallback_race.call("_resolve_car_id")) == "sedan", "empty car falls back to sedan (got %s)" % String(fallback_race.call("_resolve_car_id")))
+	ctx.tree.root.remove_child(fallback_race)
+	fallback_race.free()
+	await ctx.tree.process_frame
+	var lonely_parent := gs.get_parent()
+	if lonely_parent != null:
+		lonely_parent.remove_child(gs)
+		await ctx.tree.process_frame
+	var missing_race = race_script.new()
+	ctx.tree.root.add_child(missing_race)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(String(missing_race.get("_event_id")) == "harbor_sprint", "missing GameState boots the event fallback")
+	ctx.check(String(missing_race.call("_resolve_car_id")) == "sedan", "missing GameState boots the car fallback")
+	ctx.tree.root.remove_child(missing_race)
+	missing_race.free()
+	await ctx.tree.process_frame
+	if lonely_parent != null:
+		lonely_parent.add_child(gs)
+		await ctx.tree.process_frame
+	gs.call("select_event", String(prev_event))
+	gs.call("select_car", String(prev_car))
+	if gs.has_method("flush"):
+		gs.call("flush")
+	await ctx.tree.process_frame
+	if mounted:
+		ctx.tree.root.remove_child(gs)
+		gs.free()
+		await ctx.tree.process_frame
 	return true
