@@ -19,6 +19,8 @@ const MOCK_RACERS: Array[String] = ["ai_1", "ai_2", "player", "ai_3", "ai_4"]
 var _event_id := ""
 var _places: Array = []
 var _player_racer := "player"
+## Drift total handed off by the race scene (optional; 0 when absent).
+var _drift_score := 0
 var _results_list: VBoxContainer
 var _unlock_banner: Label
 var _best_banner: Label
@@ -114,6 +116,8 @@ func _resolve_result() -> void:
 	_event_id = str(event_id)
 	_places = rows
 	_player_racer = str(player) if (player is String) and not (player as String).is_empty() else MOCK_PLAYER
+	var drift: Variant = data.get("drift_score", 0)
+	_drift_score = maxi(int(drift), 0) if (drift is int or drift is float) else 0
 
 
 ## Fixed deterministic mock: player P3 on harbor_sprint, 5 rows.
@@ -125,13 +129,15 @@ func _mock_result() -> Dictionary:
 			"time_s": MOCK_TIMES[i],
 			"place": i + 1,
 		})
-	return {"event_id": MOCK_EVENT, "places": rows, "player_racer": MOCK_PLAYER}
+	return {"event_id": MOCK_EVENT, "places": rows, "player_racer": MOCK_PLAYER, "drift_score": 0}
 
 
 func _apply_dict(data: Dictionary) -> void:
 	_event_id = str(data.get("event_id", MOCK_EVENT))
 	_places = (data.get("places", []) as Array).duplicate(true)
 	_player_racer = str(data.get("player_racer", MOCK_PLAYER))
+	var drift: Variant = data.get("drift_score", 0)
+	_drift_score = maxi(int(drift), 0) if (drift is int or drift is float) else 0
 
 
 ## One Label per place into ResultsList ("P1  player  01:28.200"); the
@@ -155,6 +161,11 @@ func _render_places() -> void:
 		if is_player:
 			label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2, 1.0))
 		_results_list.add_child(label)
+	if _drift_score > 0:
+		var drift_label := Label.new()
+		drift_label.text = "DRIFT +%d" % _drift_score
+		drift_label.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2, 1.0))
+		_results_list.add_child(drift_label)
 
 
 ## Record the podium through the GameState wrapper and refresh the best
@@ -180,6 +191,7 @@ func _apply_progression() -> void:
 		if snap is Dictionary:
 			_show_unlock(snap as Dictionary)
 	_compare_best(player_time, player_place)
+	_compare_drift_best()
 
 
 func _show_unlock(snap: Dictionary) -> void:
@@ -205,6 +217,24 @@ func _compare_best(player_time: float, player_place: int) -> void:
 		return
 	if _best_banner != null:
 		_best_banner.text = "NEW BEST: %s" % _format_time(player_time)
+		_best_banner.visible = true
+
+
+## Compare the drift total against the stored records entry through the
+## shared DriftScoring helper; BestBanner shows (or extends the time
+## banner) only when the score is beaten or no record exists yet.
+func _compare_drift_best() -> void:
+	if _event_id.is_empty() or _drift_score <= 0:
+		return
+	var improved := DriftScoring.save_best_if_higher(_event_id, _drift_score)
+	if not improved:
+		return
+	if _best_banner == null:
+		return
+	if _best_banner.visible:
+		_best_banner.text += "  DRIFT +%d" % _drift_score
+	else:
+		_best_banner.text = "NEW BEST: DRIFT +%d" % _drift_score
 		_best_banner.visible = true
 
 

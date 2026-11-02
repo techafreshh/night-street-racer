@@ -17,6 +17,7 @@ const EVENT_PATHS: Array[String] = [
 	"res://assets/events/neon_loop.tres",
 	"res://assets/events/bayline_circuit.tres",
 	"res://assets/events/alley_sprint.tres",
+	"res://assets/events/drift_park.tres",
 ]
 
 

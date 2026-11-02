@@ -18,6 +18,12 @@ var _route: RaceRoute = null
 ## Cached personal best for the current event, loaded once in _bind_race so
 ## the per-frame delta push never touches disk while RACING.
 var _cached_best := -1.0
+## Player car sampled for drift scoring; set once in _spawn_player_car.
+var _player_car: VehicleController = null
+## Accumulated drift points for the current run (banked to the HUD popup).
+var _drift_total := 0.0
+## Last whole-point total already pushed to the HUD popup.
+var _drift_last_shown := 0
 
 
 func _ready() -> void:
@@ -99,6 +105,7 @@ func _spawn_player_car() -> void:
 	if car == null:
 		return
 	car.use_player_input = true
+	_player_car = car
 	add_child(car)
 	_place_on_route(car)
 
@@ -124,12 +131,14 @@ func _place_on_route(car: VehicleController) -> void:
 	car.global_transform = Transform3D(Basis(Vector3.UP, yaw), Vector3(start.x, start.y + 1.0, start.z))
 
 
-## Per-frame live delta push: in time-trial mode with a stored best,
-## mirror race_time - best to the HUD DeltaLabel while RACING. Uses the
-## best cached in _bind_race; no disk reads happen here.
+## Per-frame live pushes while RACING: drift samples always score into the
+## run total (banked whole points to the HUD DriftPopup), and in time-trial
+## mode with a stored best, race_time - best mirrors to the HUD DeltaLabel.
+## Uses the bests cached in _bind_race; no disk reads happen here.
 func _process(_delta: float) -> void:
 	if _manager == null or _manager.state != RaceEventManager.State.RACING:
 		return
+	_sample_drift(_delta)
 	if not _is_time_trial():
 		return
 	var hud := get_node_or_null("HUD")
@@ -138,6 +147,31 @@ func _process(_delta: float) -> void:
 	if _cached_best <= 0.0:
 		return
 	hud.call("set_delta", _manager.race_time - _cached_best)
+
+
+## Score one drift sample from the player car velocity vs basis: slip comes
+## from DriftScoring.slip_angle_deg (the VehicleController atan2 shape),
+## points from DriftScoring.score_delta, banked whole points to the existing
+## hud.show_drift sink. Display-only push; the HUD never simulates.
+func _sample_drift(delta: float) -> void:
+	if _player_car == null or not is_instance_valid(_player_car):
+		return
+	if delta <= 0.0:
+		return
+	var basis_xform: Basis = _player_car.global_transform.basis
+	var fwd := -basis_xform.z
+	var right := basis_xform.x
+	var vel: Vector3 = _player_car.linear_velocity
+	var slip := DriftScoring.slip_angle_deg(vel.dot(fwd), vel.dot(right))
+	var planar := Vector2(vel.x, vel.z).length()
+	_drift_total += DriftScoring.score_delta(slip, planar, delta)
+	var whole := int(_drift_total)
+	if whole <= _drift_last_shown:
+		return
+	_drift_last_shown = whole
+	var hud := get_node_or_null("HUD")
+	if hud != null and hud.has_method("show_drift"):
+		hud.call("show_drift", whole)
 
 
 ## True when GameState selects the solo time-trial mode (single spelling:
@@ -159,6 +193,8 @@ func _bind_race() -> void:
 		if not _manager.race_finished.is_connected(_on_finished):
 			_manager.race_finished.connect(_on_finished)
 	_cached_best = TimeTrial.get_best(_event_id)
+	_drift_total = 0.0
+	_drift_last_shown = 0
 	var hud := get_node_or_null("HUD")
 	if hud != null and hud.has_method("set_race_time"):
 		hud.call("set_race_time", 0.0)
@@ -181,6 +217,7 @@ func _on_finished() -> void:
 		"event_id": _event_id,
 		"places": table.ordered_results(),
 		"player_racer": "player",
+		"drift_score": int(_drift_total),
 	}
 	var gs := get_node_or_null("/root/GameState")
 	if gs != null and gs.has_method("set_last_result"):

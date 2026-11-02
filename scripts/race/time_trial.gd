@@ -99,6 +99,11 @@ static func save_best_if_faster(event_id: String, time_s: float, place := 1) -> 
 			if stored is int or stored is float:
 				if float(stored) <= time_s:
 					return false
-	table[event_id] = {"best_time_s": time_s, "best_position": place}
+	var merged := {}
+	if table.has(event_id) and table[event_id] is Dictionary:
+		merged = (table[event_id] as Dictionary).duplicate()
+	merged["best_time_s"] = time_s
+	merged["best_position"] = place
+	table[event_id] = merged
 	data["records"] = table
 	return SaveSystem.save_game(data)

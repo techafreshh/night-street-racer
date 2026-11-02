@@ -16,6 +16,7 @@ const LADDER: Array[String] = [
 	"neon_loop",
 	"bayline_circuit",
 	"alley_sprint",
+	"drift_park",
 ]
 ## Win reward per ladder rung (clamped index): harbor grants coupe,
 ## downtown grants hatch, neon onward grants awd.
