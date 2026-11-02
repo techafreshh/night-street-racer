@@ -258,7 +258,8 @@ func _on_car_chosen(car_id: String) -> void:
 	_current_car = StringName(car_id)
 	var gs := _game_state()
 	if gs != null:
-		gs.select_car(car_id)
+		if gs.has_method("select_car"):
+			gs.call("select_car", car_id)
 		print("CAR_SELECTED %s" % car_id)
 	_show_car(_current_car)
 
@@ -267,7 +268,8 @@ func _on_color_chosen(color_idx: int) -> void:
 	_current_color = posmod(color_idx, CarPaint.COLORS.size())
 	var gs := _game_state()
 	if gs != null:
-		gs.select_color(_current_color)
+		if gs.has_method("select_color"):
+			gs.call("select_color", _current_color)
 		print("COLOR_SELECTED %d" % _current_color)
 	_apply_preview_paint()
 	_update_info()

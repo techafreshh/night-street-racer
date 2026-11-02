@@ -26,6 +26,7 @@ func get_test_names() -> Array[String]:
 		"test_garage_grid_single_save_read",
 		"test_garage_grid_no_per_button_reads",
 		"garage_typed_selection_reads",
+		"test_garage_writers_guarded",
 	]
 	return names
 
@@ -768,4 +769,79 @@ func garage_typed_selection_reads() -> bool:
 		ctx.tree.root.remove_child(gs)
 		gs.free()
 		await ctx.tree.process_frame
+	return true
+
+func test_garage_writers_guarded() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/garage.gd")
+	ctx.check(src != "", "garage.gd source loads for the writer-guard probe")
+	if src == "":
+		return true
+	ctx.check(src.contains("has_method(\"select_car\")"), "garage guards the select_car writer")
+	ctx.check(src.contains("gs.call(\"select_car\""), "garage routes the car write through call")
+	ctx.check(src.contains("has_method(\"select_color\")"), "garage guards the select_color writer")
+	ctx.check(src.contains("gs.call(\"select_color\""), "garage routes the color write through call")
+	ctx.check(not src.contains("gs.set(\"selected_car\""), "garage keeps no untyped selected_car writer")
+	ctx.check(not src.contains("gs.set(\"selected_color\""), "garage keeps no untyped selected_color writer")
+	ctx.check(src.contains("CAR_SELECTED"), "garage keeps the CAR_SELECTED token")
+	ctx.check(src.contains("COLOR_SELECTED"), "garage keeps the COLOR_SELECTED token")
+	var real_gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	if real_gs != null:
+		ctx.tree.root.remove_child(real_gs)
+		await ctx.tree.process_frame
+	var mock := Node.new()
+	mock.name = "GameState"
+	ctx.tree.root.add_child(mock)
+	await ctx.tree.process_frame
+	ctx.check(not mock.has_method("select_car"), "writer-less mock lacks select_car")
+	ctx.check(not mock.has_method("select_color"), "writer-less mock lacks select_color")
+	var probe := GarageUI.new()
+	ctx.tree.root.add_child(probe)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	probe._on_car_chosen("hatch")
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(is_instance_valid(probe), "writer-less _on_car_chosen does not error")
+	ctx.check(StringName(probe.get("_current_car")) == &"hatch", "writer-less _on_car_chosen still updates _current_car")
+	probe._on_color_chosen(2)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(is_instance_valid(probe), "writer-less _on_color_chosen does not error")
+	ctx.check(int(probe.get("_current_color")) == 2, "writer-less _on_color_chosen still updates _current_color")
+	probe.call("_update_info")
+	ctx.check(is_instance_valid(probe), "writer-less preview/info update does not error")
+	ctx.tree.root.remove_child(probe)
+	probe.free()
+	ctx.tree.root.remove_child(mock)
+	mock.free()
+	if real_gs != null:
+		ctx.tree.root.add_child(real_gs)
+		await ctx.tree.process_frame
+	var live_gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	ctx.check(live_gs != null, "GameState is restored for the guarded-write probe")
+	if live_gs == null:
+		return true
+	ctx.check(live_gs.has_method("select_car"), "GameState exposes select_car")
+	ctx.check(live_gs.has_method("select_color"), "GameState exposes select_color")
+	var prev_car := StringName(live_gs.get("selected_car"))
+	var prev_color := int(live_gs.get("selected_color"))
+	var live_probe := GarageUI.new()
+	ctx.tree.root.add_child(live_probe)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	live_probe._on_car_chosen("hatch")
+	await ctx.tree.process_frame
+	ctx.check(StringName(live_gs.get("selected_car")) == &"hatch", "guarded car write persists hatch with the real GameState")
+	ctx.check(StringName(live_probe.get("_current_car")) == &"hatch", "guarded _on_car_chosen updates _current_car")
+	live_probe._on_color_chosen(2)
+	await ctx.tree.process_frame
+	ctx.check(int(live_gs.get("selected_color")) == 2, "guarded color write persists 2 with the real GameState")
+	ctx.check(int(live_probe.get("_current_color")) == 2, "guarded _on_color_chosen updates _current_color")
+	ctx.tree.root.remove_child(live_probe)
+	live_probe.free()
+	live_gs.set("selected_car", prev_car)
+	live_gs.set("selected_color", prev_color)
+	if live_gs.has_method("flush"):
+		live_gs.call("flush")
+	await ctx.tree.process_frame
 	return true
