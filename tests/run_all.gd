@@ -36,6 +36,7 @@ func _run_all() -> void:
 		"test_save_system_roundtrip",
 		"test_gamestate_rejects_nonint_color",
 		"test_save_system_drops_unknown_settings_keys",
+		"test_save_system_rejects_unknown_settings_keys",
 		"test_save_system_partial_settings_merge",
 		"test_save_system_drops_unknown_progress_keys",
 		"test_save_system_records_per_entry_merge",
@@ -499,6 +500,17 @@ func test_save_system_drops_unknown_settings_keys() -> bool:
 	check(not loaded_settings.has(" aimbot"), "unknown settings key with space is dropped")
 	check(SaveSystem.validate(loaded), "unknown settings keys load back valid")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "unknown settings probe restores defaults")
+	return true
+
+func test_save_system_rejects_unknown_settings_keys() -> bool:
+	var clean := SaveSystem.default_data()
+	check(SaveSystem.validate(clean), "default settings validate")
+	var bogus := SaveSystem.default_data()
+	(bogus["settings"] as Dictionary)["bogus_key"] = 123
+	check(not SaveSystem.validate(bogus), "extra settings key bogus_key fails SaveSystem.validate()")
+	var spaced := SaveSystem.default_data()
+	(spaced["settings"] as Dictionary)[" aimbot"] = true
+	check(not SaveSystem.validate(spaced), "extra settings key with space fails SaveSystem.validate()")
 	return true
 
 func test_save_system_drops_unknown_top_level_keys() -> bool:
