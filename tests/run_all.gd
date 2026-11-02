@@ -219,6 +219,22 @@ func test_save_system_roundtrip() -> bool:
 	check(SaveSystem.SAVE_VERSION == 1, "save schema version is 1")
 	var blank := SaveSystem.default_data()
 	check(SaveSystem.validate(blank), "default_data passes SaveSystem.validate()")
+	check(int((blank["progress"] as Dictionary).get("selected_color")) == 0, "default selected_color is int 0")
+	var float_color := SaveSystem.default_data()
+	(float_color["progress"] as Dictionary)["selected_color"] = 2.0
+	check(SaveSystem.validate(float_color), "float selected_color validates as JSON round-trip equivalent")
+	var bad_color := SaveSystem.default_data()
+	(bad_color["progress"] as Dictionary)["selected_color"] = "red"
+	check(not SaveSystem.validate(bad_color), "String selected_color fails SaveSystem.validate()")
+	var missing_color := SaveSystem.default_data()
+	(missing_color["progress"] as Dictionary).erase("selected_color")
+	check(not SaveSystem.validate(missing_color), "missing selected_color fails SaveSystem.validate()")
+	var color_trip := SaveSystem.default_data()
+	(color_trip["progress"] as Dictionary)["selected_color"] = 2
+	check(SaveSystem.save_game(color_trip), "save_game writes a non-default int selected_color")
+	var color_loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(color_loaded), "non-default int selected_color loads back valid")
+	check(int((color_loaded["progress"] as Dictionary).get("selected_color")) == 2, "roundtrip keeps selected_color")
 	var data := SaveSystem.default_data()
 	var progress: Dictionary = data["progress"]
 	progress["selected_car"] = "hatch"

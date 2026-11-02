@@ -37,9 +37,10 @@ static func default_data() -> Dictionary:
 	}
 
 
-## Strict shape check: version must equal SAVE_VERSION and the progress
-## selection keys must be strings. Lenient future-version merging lives in
-## load_game(), not here.
+## Strict shape check: version must equal SAVE_VERSION, the progress
+## selected_car/current_event keys must be strings and selected_color must be
+## numeric (int or float; float covers JSON round-trip coercion).
+## Lenient future-version merging lives in load_game(), not here.
 static func validate(data: Dictionary) -> bool:
 	if int(data.get("version", -1)) != SAVE_VERSION:
 		return false
@@ -53,6 +54,9 @@ static func validate(data: Dictionary) -> bool:
 	if not ((progress as Dictionary).get("selected_car") is String):
 		return false
 	if not ((progress as Dictionary).get("current_event") is String):
+		return false
+	var color: Variant = (progress as Dictionary).get("selected_color")
+	if not (color is int or color is float):
 		return false
 	return true
 
