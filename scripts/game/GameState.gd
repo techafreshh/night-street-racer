@@ -82,6 +82,23 @@ func select_color(color_idx: int) -> void:
 	selected_color = color_idx
 
 
+## In-memory post-race handoff for the results screen (issue #22): never
+## written to user://save.json, so the save schema is untouched. Reads live
+## here; the race sets it before changing to scenes/ui/results.tscn and the
+## results screen duplicates it back out on read.
+var last_result: Dictionary = {}
+
+
+## Typed writer: store a duplicate of the result dict for the results screen.
+func set_last_result(result: Dictionary) -> void:
+	last_result = result.duplicate(true)
+
+
+## Typed writer: drop the handoff so the next boot falls back to the mock.
+func clear_last_result() -> void:
+	last_result = {}
+
+
 ## Thin wrapper: record a result through the ladder, then refresh the cache.
 func apply_result(event_id: String, place: int) -> Dictionary:
 	var result := Progression.apply_result(event_id, place)
