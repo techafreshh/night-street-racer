@@ -45,6 +45,7 @@ func _run_all() -> void:
 		"test_save_system_drops_unknown_top_level_keys",
 		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
+		"test_gamestate_coalesces_rapid_writes",
 		"test_gamestate_reload_rejects_non_numeric_color",
 		"test_gamestate_selected_car_default",
 		"test_main_menu_scene",
@@ -706,6 +707,7 @@ func test_gamestate_persists_selection() -> bool:
 		return true
 	first.select_car("hatch")
 	first.select_event("neon_loop")
+	first.flush()
 	var second = script.new()
 	check(second != null, "second GameState instantiates standalone")
 	if second == null:
@@ -715,9 +717,45 @@ func test_gamestate_persists_selection() -> bool:
 	second.reload_from_disk()
 	check(StringName(second.get("selected_car")) == &"hatch", "fresh instance observes saved selected_car")
 	check(StringName(second.get("current_event")) == &"neon_loop", "fresh instance observes saved current_event")
+	first.flush()
+	second.flush()
 	first.free()
 	second.free()
 	check(SaveSystem.save_game(SaveSystem.default_data()), "persistence probe restores defaults")
+	return true
+
+func test_gamestate_coalesces_rapid_writes() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the coalescing probe")
+	if script == null:
+		return true
+	check(SaveSystem.save_game(SaveSystem.default_data()), "coalescing probe starts from defaults")
+	var node = script.new()
+	check(node != null, "GameState instantiates standalone for the coalescing probe")
+	if node == null:
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	node.select_car("hatch")
+	node.select_color(2)
+	node.select_event("neon_loop")
+	var before := SaveSystem.load_game()
+	var before_progress: Dictionary = before["progress"]
+	check(str(before_progress.get("selected_car")) == "", "three rapid writes schedule no synchronous disk write")
+	check(int(before_progress.get("selected_color")) == 0, "selected_color still default before flush")
+	check(str(before_progress.get("current_event")) == "", "current_event still default before flush")
+	node.flush()
+	var after := SaveSystem.load_game()
+	var after_progress: Dictionary = after["progress"]
+	check(str(after_progress.get("selected_car")) == "hatch", "one flush durably stores selected_car")
+	check(int(after_progress.get("selected_color")) == 2, "one flush durably stores selected_color")
+	check(str(after_progress.get("current_event")) == "neon_loop", "one flush durably stores current_event")
+	var before_flush := FileAccess.get_file_as_string(SaveSystem.SAVE_PATH)
+	node.flush()
+	var after_flush := FileAccess.get_file_as_string(SaveSystem.SAVE_PATH)
+	check(after_flush == before_flush, "repeat flush without new writes writes nothing")
+	node.flush()
+	node.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "coalescing probe restores defaults")
 	return true
 
 func test_gamestate_reload_rejects_non_numeric_color() -> bool:
@@ -1145,6 +1183,7 @@ func test_garage_color_persists() -> bool:
 	await process_frame
 	await process_frame
 	check(int(gs.get("selected_color")) == 2, "swatch press writes selected_color")
+	gs.flush()
 	gs.reload_from_disk()
 	check(int(gs.get("selected_color")) == 2, "selected_color survives reload_from_disk")
 	var preview := instance.find_child("CarPreview", true, false) as SubViewport
@@ -1162,6 +1201,7 @@ func test_garage_color_persists() -> bool:
 	root.remove_child(instance)
 	instance.free()
 	await process_frame
+	gs.flush()
 	check(SaveSystem.save_game(SaveSystem.default_data()), "color probe restores defaults")
 	if mounted:
 		root.remove_child(gs)

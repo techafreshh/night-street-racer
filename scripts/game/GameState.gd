@@ -5,10 +5,12 @@ extends Node
 ## instantiate it without entering the scene tree.
 ## Selection persists across restarts via SaveSystem (user://save.json):
 ## _ready() loads the last saved selection, the selected_car/selected_color/
-## current_event setters persist on every change, and select_event()/
-## select_car()/select_color() are the typed writer APIs (menu.gd uses
-## select_event, garage.gd uses select_car/select_color). Disk failures are silent
-## no-ops so standalone instances never error headless.
+## current_event setters mark the selection dirty and persist once per frame
+## (plus on flush()/exit) instead of writing per assignment, and
+## select_event()/select_car()/select_color() are the typed writer APIs
+## (menu.gd uses select_event, garage.gd uses select_car/select_color).
+## Disk failures are silent no-ops so standalone instances never error
+## headless.
 
 ## Canonical default car id (owner of assets/cars/tunes/default_tune.tres,
 ## the car_sedan.tscn tune); used to fill selected_car when empty.
@@ -16,25 +18,42 @@ const DEFAULT_CAR: StringName = &"sedan"
 
 ## True while bulk-loading from disk so the setters skip write-back.
 var _loading := false
+## True while a coalesced write-back is scheduled but not yet flushed.
+var _persist_pending := false
 
 var selected_car: StringName = &"":
 	set(value):
+		if _loading:
+			selected_car = value
+			return
+		if selected_car == value:
+			return
 		selected_car = value
-		_persist()
+		_request_persist()
 	get:
 		return selected_car
 
 var selected_color: int = 0:
 	set(value):
+		if _loading:
+			selected_color = value
+			return
+		if selected_color == value:
+			return
 		selected_color = value
-		_persist()
+		_request_persist()
 	get:
 		return selected_color
 
 var current_event: StringName = &"":
 	set(value):
+		if _loading:
+			current_event = value
+			return
+		if current_event == value:
+			return
 		current_event = value
-		_persist()
+		_request_persist()
 	get:
 		return current_event
 
@@ -74,6 +93,7 @@ func apply_result(event_id: String, place: int) -> Dictionary:
 ## back to defaults without erroring, non-numeric selected_color falls back
 ## to 0, and write-back stays suppressed.
 func reload_from_disk() -> void:
+	_persist_pending = false
 	_loading = true
 	var data := SaveSystem.load_game()
 	var progress: Dictionary = data.get("progress", {})
@@ -109,3 +129,38 @@ func _persist() -> void:
 	progress["current_event"] = str(current_event)
 	data["progress"] = progress
 	SaveSystem.save_game(data)
+
+
+## Mark the selection dirty and schedule exactly one deferred write-back,
+## no matter how many setters fire in the same frame. No-op while
+## bulk-loading and when a write is already scheduled.
+func _request_persist() -> void:
+	if _loading:
+		return
+	if _persist_pending:
+		return
+	_persist_pending = true
+	call_deferred("_deferred_persist")
+
+
+## Deferred write-back target: clears the pending flag first so a stranded
+## call after an explicit flush() is a no-op.
+func _deferred_persist() -> void:
+	if not _persist_pending:
+		return
+	_persist_pending = false
+	_persist()
+
+
+## Synchronous read-your-writes: durably store the pending selection now.
+## Clears the pending flag first so a stranded deferred call afterwards is
+## a no-op; a second flush without new writes writes nothing.
+func flush() -> void:
+	if not _persist_pending:
+		return
+	_persist_pending = false
+	_persist()
+
+
+func _exit_tree() -> void:
+	flush()
