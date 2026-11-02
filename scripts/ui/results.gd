@@ -2,8 +2,8 @@ class_name ResultsUI
 extends Node
 ## Post-race results screen: lists places 1-5 with times, highlights the
 ## player row, celebrates fresh NEW UNLOCK / NEW BEST banners, and offers
-## Next/Retry/Menu navigation. Pulls the in-memory GameState.last_result
-## handoff in _ready and falls back to a fixed 5-row mock when it is
+## Next/Retry/Menu navigation. Reads the in-memory handoff via the
+## GameState.get_last_result() reader in _ready and falls back to a fixed 5-row mock when it is
 ## missing or invalid, so standalone headless boots always reach
 ## RESULTS_READY places=5. Unlocks flow through GameState.apply_result
 ## (Progression ladder + SaveSystem + cache refresh); best times flow
@@ -58,7 +58,7 @@ func _format_time(seconds: float) -> String:
 	return "%02d:%02d.%03d" % [minutes, secs, millis]
 
 
-## Read the GameState.last_result handoff; accept it only when event_id is
+## Read the handoff via the GameState.get_last_result() reader; accept it only when event_id is
 ## a non-empty String and places holds 1+ valid {racer, time_s, place}
 ## rows. Sorts by place, clamps times >= 0, and keeps the first 5 rows.
 ## Anything missing or invalid falls back to the fixed mock.
