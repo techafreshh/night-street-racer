@@ -104,9 +104,10 @@ func _on_garage() -> void:
 
 
 func _on_settings() -> void:
-	var info := _info()
-	if info != null:
-		info.text = "Settings available in a later lap"
+	var tree := get_tree()
+	if tree == null:
+		return
+	tree.change_scene_to_file("res://scenes/ui/settings.tscn")
 
 
 func _on_quit() -> void:
