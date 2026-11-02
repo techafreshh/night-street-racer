@@ -82,6 +82,7 @@ func _run_all() -> void:
 		"test_car_kit_glb_present",
 		"test_car_kit_credits",
 		"test_car_scenes_load",
+		"hud_subscribes_to_race_signals",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -2055,4 +2056,55 @@ func test_car_scenes_load() -> bool:
 			inst.queue_free()
 			await process_frame
 			await physics_frame
+	return true
+
+func hud_subscribes_to_race_signals() -> bool:
+	var packed = load("res://scenes/ui/hud.tscn")
+	check(packed is PackedScene, "hud.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "hud instantiates")
+	if instance == null:
+		return true
+	check(instance.get_script() != null, "hud root carries the HUD script")
+	for label_name in ["SpeedLabel", "GearLabel", "PositionLabel", "TimerLabel", "DriftPopup", "Minimap"]:
+		check(instance.get_node_or_null(label_name) != null, "hud has %s" % label_name)
+	check(instance.get_node_or_null("Minimap/SubViewport") is SubViewport, "minimap hosts a SubViewport")
+	var drift := instance.get_node_or_null("DriftPopup") as Label
+	check(drift != null and drift.visible == false, "drift popup starts hidden")
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	check(instance.has_method("set_speed"), "hud exposes set_speed")
+	check(instance.has_method("set_gear"), "hud exposes set_gear")
+	check(instance.has_method("set_lap_position"), "hud exposes set_lap_position")
+	check(instance.has_method("set_race_time"), "hud exposes set_race_time")
+	check(instance.has_method("show_drift"), "hud exposes show_drift")
+	instance.call("set_speed", 20.0)
+	check((instance.get_node_or_null("SpeedLabel") as Label).text == "72 km/h", "speed formats m/s to km/h")
+	instance.call("set_gear", 3, false)
+	check((instance.get_node_or_null("GearLabel") as Label).text == "3", "gear shows the gear number")
+	instance.call("set_gear", 2, true)
+	check((instance.get_node_or_null("GearLabel") as Label).text == "R", "gear shows R while reversing")
+	instance.call("set_lap_position", 2, 4, 2, 3)
+	check((instance.get_node_or_null("PositionLabel") as Label).text == "P2/4  LAP 2/3", "position/lap formats P2/4 LAP 2/3")
+	instance.call("set_race_time", 65.5)
+	check((instance.get_node_or_null("TimerLabel") as Label).text == "01:05.500", "timer formats mm:ss.mmm")
+	instance.call("show_drift", 250)
+	check((instance.get_node_or_null("DriftPopup") as Label).text == "DRIFT +250", "drift popup shows the score")
+	check((instance.get_node_or_null("DriftPopup") as Label).visible == true, "drift popup shows on score")
+	instance.call("set_minimap_player", Vector2(0.5, 0.5))
+	var dot := instance.get_node_or_null("Minimap/SubViewport/PlayerDot") as ColorRect
+	check(dot != null and absf(dot.position.x - 97.0) < 0.5 and absf(dot.position.y - 97.0) < 0.5, "player marker centers at 0.5,0.5")
+	instance.call("set_minimap_checkpoints", [Vector2(0, 0), Vector2(1, 1)])
+	var layer := instance.get_node_or_null("Minimap/SubViewport/CheckpointLayer")
+	check(layer != null and layer.get_child_count() == 2, "checkpoint markers spawn from pushed points")
+	var src := FileAccess.get_file_as_string("res://scripts/ui/hud.gd")
+	check(src.contains("connect"), "hud script subscribes via connect")
+	check(src.contains("HUD_READY"), "hud script prints HUD_READY")
+	for banned in ["_physics_process", "apply_force", "apply_central_force", "linear_velocity", "angular_velocity", "RayCast", "PhysicsDirectBodyState3D"]:
+		check(not src.contains(banned), "hud script carries no %s" % banned)
+	root.remove_child(instance)
+	instance.free()
 	return true
