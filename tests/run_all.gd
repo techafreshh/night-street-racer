@@ -33,8 +33,10 @@ func _run_all() -> void:
 		"test_autoload_gamestate",
 		"test_input_actions",
 		"test_gamestate_standalone",
+		"test_gamestate_selected_car_default",
 		"test_main_menu_scene",
 		"test_menu_buttons",
+		"test_garage_writes_selected_car",
 		"test_event_select_grid",
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
@@ -201,6 +203,81 @@ func test_gamestate_standalone() -> bool:
 		check(node is Node, "GameState is a Node")
 		if node != null:
 			node.free()
+	return true
+
+func test_gamestate_selected_car_default() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads")
+	if script == null:
+		return true
+	check(script.get("DEFAULT_CAR") == &"sedan", "DEFAULT_CAR is sedan")
+	var node: Node = script.new()
+	check(node != null, "GameState instantiates standalone")
+	if node == null:
+		return true
+	check("selected_car" in node, "GameState exposes selected_car")
+	check(StringName(node.get("selected_car")) == &"", "selected_car starts empty")
+	node.set("selected_car", node.get("DEFAULT_CAR"))
+	check(StringName(node.get("selected_car")) == &"sedan", "default fills selected_car with sedan")
+	node.free()
+	var car_packed = load("res://scenes/vehicles/car_sedan.tscn")
+	check(car_packed is PackedScene, "default car scene car_sedan.tscn loads")
+	return true
+
+func test_garage_writes_selected_car() -> bool:
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for garage wiring")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable")
+	if gs == null:
+		return true
+	var prev_car := StringName(gs.get("selected_car"))
+	gs.set("selected_car", &"")
+	var packed = load("res://scenes/ui/main_menu.tscn")
+	check(packed is PackedScene, "main_menu.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		gs.set("selected_car", prev_car)
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var garage := instance.find_child("GarageButton", true, false) as BaseButton
+	var info := instance.find_child("InfoLabel", true, false) as Label
+	check(garage != null, "main menu has GarageButton")
+	check(info != null, "main menu has InfoLabel")
+	if garage != null and info != null:
+		garage.pressed.emit()
+		await process_frame
+		check(info.text != "", "Garage keeps its placeholder label")
+		check(StringName(gs.get("selected_car")) == &"sedan", "fresh Garage press fills selected_car with sedan")
+		gs.set("selected_car", &"hatch")
+		garage.pressed.emit()
+		await process_frame
+		check(StringName(gs.get("selected_car")) == &"hatch", "Garage never clobbers a pre-set car")
+		check(info.text != "", "placeholder label stays non-empty on repeat press")
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	check(src.contains("selected_car"), "menu.gd wires selected_car")
+	check(src.contains("CAR_SELECTED"), "menu.gd prints the CAR_SELECTED token")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	gs.set("selected_car", prev_car)
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
 	return true
 
 func test_main_menu_scene() -> bool:
