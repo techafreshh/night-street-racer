@@ -64,9 +64,17 @@ func reload_from_disk() -> void:
 	_loading = true
 	var data := SaveSystem.load_game()
 	var progress: Dictionary = data.get("progress", {})
-	selected_car = StringName(str(progress.get("selected_car", &"")))
+	var raw_car: Variant = progress.get("selected_car", &"")
+	if raw_car is String or raw_car is StringName:
+		selected_car = StringName(raw_car)
+	else:
+		selected_car = &""
 	selected_color = int(progress.get("selected_color", 0))
-	current_event = StringName(str(progress.get("current_event", &"")))
+	var raw_event: Variant = progress.get("current_event", &"")
+	if raw_event is String or raw_event is StringName:
+		current_event = StringName(raw_event)
+	else:
+		current_event = &""
 	_loading = false
 
 

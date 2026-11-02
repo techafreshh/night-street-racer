@@ -153,10 +153,7 @@ static func load_game() -> Dictionary:
 		var progress: Dictionary = merged["progress"]
 		var saved_progress: Dictionary = raw["progress"]
 		for key: Variant in saved_progress.keys():
-			if key == "selected_car" or key == "current_event":
-				progress[key] = str(saved_progress[key])
-			else:
-				progress[key] = saved_progress[key]
+			progress[key] = saved_progress[key]
 	if raw.get("records") is Dictionary:
 		merged["records"] = raw["records"]
 	merged["version"] = SAVE_VERSION

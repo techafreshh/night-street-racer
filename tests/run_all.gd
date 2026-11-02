@@ -34,6 +34,7 @@ func _run_all() -> void:
 		"test_input_actions",
 		"test_gamestate_standalone",
 		"test_save_system_roundtrip",
+		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
 		"test_gamestate_selected_car_default",
 		"test_main_menu_scene",
@@ -302,6 +303,56 @@ func test_save_system_roundtrip() -> bool:
 	check(str(fallback_progress.get("selected_car")) == "", "corrupt fallback resets selected_car")
 	check(str(fallback_progress.get("current_event")) == "", "corrupt fallback resets current_event")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "save restores defaults after the probe")
+	return true
+
+func test_save_system_rejects_nonstring_selection() -> bool:
+	var bad := SaveSystem.default_data()
+	(bad["progress"] as Dictionary)["selected_car"] = 42
+	(bad["progress"] as Dictionary)["current_event"] = true
+	check(SaveSystem.save_game(bad), "save_game writes wrong-typed selection probe")
+	var loaded := SaveSystem.load_game()
+	var loaded_progress: Dictionary = loaded["progress"]
+	var loaded_car: Variant = loaded_progress.get("selected_car")
+	var loaded_event: Variant = loaded_progress.get("current_event")
+	check(not (loaded_car is String), "wrong-typed selected_car loads uncoerced")
+	check(typeof(loaded_car) != TYPE_STRING, "wrong-typed selected_car keeps its disk type")
+	check(not (loaded_event is String), "wrong-typed current_event loads uncoerced")
+	check(not SaveSystem.validate(loaded), "wrong-typed selection fails SaveSystem.validate()")
+	var bad_dict := SaveSystem.default_data()
+	(bad_dict["progress"] as Dictionary)["selected_car"] = "hatch"
+	(bad_dict["progress"] as Dictionary)["current_event"] = {"route": "neon_loop"}
+	check(SaveSystem.save_game(bad_dict), "save_game writes dict current_event probe")
+	var loaded_dict := SaveSystem.load_game()
+	var loaded_dict_event: Variant = (loaded_dict["progress"] as Dictionary).get("current_event")
+	check(not (loaded_dict_event is String), "dict current_event loads uncoerced")
+	check(not SaveSystem.validate(loaded_dict), "dict current_event fails SaveSystem.validate()")
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the coercion probe")
+	if script != null:
+		var node = script.new()
+		check(node != null, "GameState instantiates standalone for the coercion probe")
+		if node != null:
+			node.reload_from_disk()
+			check(StringName(node.get("selected_car")) == &"hatch", "valid selected_car still loads via reload_from_disk")
+			check(StringName(node.get("current_event")) == &"", "dict current_event reloads to the safe default")
+			node.free()
+	check(SaveSystem.save_game(bad), "save_game rewrites the int/bool probe")
+	if script != null:
+		var probe = script.new()
+		if probe != null:
+			probe.reload_from_disk()
+			check(StringName(probe.get("selected_car")) == &"", "int selected_car reloads to the safe default, not &\"42\"")
+			check(StringName(probe.get("current_event")) == &"", "bool current_event reloads to the safe default")
+			probe.free()
+	var good := SaveSystem.default_data()
+	(good["progress"] as Dictionary)["selected_car"] = "hatch"
+	(good["progress"] as Dictionary)["current_event"] = "neon_loop"
+	check(SaveSystem.save_game(good), "save_game writes valid String selection")
+	var good_loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(good_loaded), "valid String selection still validates")
+	check(str((good_loaded["progress"] as Dictionary).get("selected_car")) == "hatch", "valid selected_car round-trips byte-identical")
+	check(str((good_loaded["progress"] as Dictionary).get("current_event")) == "neon_loop", "valid current_event round-trips byte-identical")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "coercion probe restores defaults")
 	return true
 
 func test_gamestate_persists_selection() -> bool:
