@@ -69,7 +69,11 @@ func reload_from_disk() -> void:
 		selected_car = StringName(raw_car)
 	else:
 		selected_car = &""
-	selected_color = int(progress.get("selected_color", 0))
+	var raw_color: Variant = progress.get("selected_color", 0)
+	if raw_color is int or raw_color is float:
+		selected_color = int(raw_color)
+	else:
+		selected_color = 0
 	var raw_event: Variant = progress.get("current_event", &"")
 	if raw_event is String or raw_event is StringName:
 		current_event = StringName(raw_event)
