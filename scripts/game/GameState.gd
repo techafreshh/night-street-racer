@@ -38,6 +38,11 @@ var current_event: StringName = &"":
 	get:
 		return current_event
 
+## Read-only unlock cache, refreshed by reload_from_disk; never written
+## by _persist (only Progression.apply_result writes the unlocked lists).
+var unlocked_events: Array = []
+var unlocked_cars: Array = []
+
 
 func _ready() -> void:
 	reload_from_disk()
@@ -56,6 +61,13 @@ func select_car(car_id: String) -> void:
 ## Typed writer: record the chosen paint index and persist it.
 func select_color(color_idx: int) -> void:
 	selected_color = color_idx
+
+
+## Thin wrapper: record a result through the ladder, then refresh the cache.
+func apply_result(event_id: String, place: int) -> Dictionary:
+	var result := Progression.apply_result(event_id, place)
+	reload_from_disk()
+	return result
 
 
 ## Re-read user://save.json into both vars. Missing or corrupt files fall
@@ -80,6 +92,8 @@ func reload_from_disk() -> void:
 		current_event = StringName(raw_event)
 	else:
 		current_event = &""
+	unlocked_events = Progression._string_list(progress.get("unlocked_events", []))
+	unlocked_cars = Progression._string_list(progress.get("unlocked_cars", []))
 	_loading = false
 
 

@@ -20,9 +20,10 @@ const EVENT_PATHS: Array[String] = [
 ]
 
 
-## Placeholder lock rule: only events with no prerequisite are open.
+## Save-backed lock rule: delegates to the Progression ladder so podiums
+## open later events after restart.
 static func is_unlocked(ev: RaceEvent) -> bool:
-	return ev != null and ev.unlock_req == &""
+	return Progression.is_event_unlocked(ev)
 
 
 func _ready() -> void:
@@ -148,6 +149,10 @@ func _build_event_grid() -> void:
 
 
 func _on_event_chosen(route_id: String) -> void:
+	var path := "res://assets/events/%s.tres" % route_id
+	var chosen := load(path) as RaceEvent if ResourceLoader.exists(path) else null
+	if chosen == null or not Progression.is_event_unlocked(chosen):
+		return
 	var gs = get_node_or_null("/root/GameState")
 	if gs != null:
 		gs.select_event(route_id)

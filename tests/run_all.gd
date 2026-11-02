@@ -107,6 +107,8 @@ func _run_all() -> void:
 		"test_car_kit_credits",
 		"test_car_scenes_load",
 		"hud_subscribes_to_race_signals",
+		"top3_unlocks_next_event",
+		"win_unlocks_car",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -3205,6 +3207,96 @@ func test_car_scenes_load() -> bool:
 			inst.queue_free()
 			await process_frame
 			await physics_frame
+	return true
+
+func top3_unlocks_next_event() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "unlock probe starts from defaults")
+	var p3 := Progression.apply_result("harbor_sprint", 3)
+	check(str(p3.get("event_unlocked", "")) == "downtown_gp", "P3 on harbor opens downtown_gp")
+	check((p3.get("unlocked_events", []) as Array).has("harbor_sprint"), "snapshot records the completed harbor_sprint")
+	check(str(p3.get("car_unlocked", "")) == "", "P3 grants no car")
+	check(not (p3.get("unlocked_cars", []) as Array).has("coupe"), "P3 adds no car entry")
+	var ev := load("res://assets/events/downtown_gp.tres") as RaceEvent
+	check(ev != null, "downtown_gp loads as RaceEvent")
+	if ev != null:
+		check(MenuUI.is_unlocked(ev), "freshly opened downtown_gp reads unlocked in the menu")
+		check(Progression.is_event_unlocked(ev), "freshly opened downtown_gp reads unlocked in Progression")
+	var locked := load("res://assets/events/neon_loop.tres") as RaceEvent
+	check(locked != null, "neon_loop loads as RaceEvent")
+	if locked != null:
+		check(not MenuUI.is_unlocked(locked), "neon_loop stays locked after one podium")
+	var noop := Progression.apply_result("harbor_sprint", 5)
+	check(str(noop.get("event_unlocked", "")) == "", "P5 unlocks no event")
+	check(str(noop.get("car_unlocked", "")) == "", "P5 grants no car")
+	check((noop.get("unlocked_events", []) as Array) == (p3.get("unlocked_events", []) as Array), "P5 changes nothing")
+	var unknown := Progression.apply_result("bogus_event", 1)
+	check(str(unknown.get("event_unlocked", "")) == "", "unknown event unlocks nothing")
+	check(str(unknown.get("car_unlocked", "")) == "", "unknown event grants no car")
+	var last := Progression.apply_result("alley_sprint", 1)
+	check(str(last.get("event_unlocked", "")) == "", "final rung P1 opens no next event")
+	check(str(last.get("car_unlocked", "")) != "", "final rung P1 still grants a car")
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for restart persistence")
+	if script != null:
+		var probe = script.new()
+		probe.reload_from_disk()
+		check((probe.get("unlocked_events") as Array).has("harbor_sprint"), "fresh instance observes saved unlocked_events")
+		check((probe.get("unlocked_cars") as Array).size() >= 1, "fresh instance observes saved unlocked_cars")
+		probe.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "unlock probe restores defaults")
+	return true
+
+func win_unlocks_car() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "car probe starts from defaults")
+	var stems: Array[String] = []
+	for path in MenuUI.EVENT_PATHS:
+		stems.append(String(path.get_file().get_basename()))
+	check(stems == Progression.LADDER, "Progression.LADDER mirrors MenuUI.EVENT_PATHS")
+	for i in Progression.LADDER.size():
+		var asset := load("res://assets/events/%s.tres" % Progression.LADDER[i]) as RaceEvent
+		check(asset != null, "%s loads as RaceEvent" % Progression.LADDER[i])
+		if asset == null:
+			continue
+		if i == 0:
+			check(asset.unlock_req == &"", "first rung %s has no prerequisite" % Progression.LADDER[i])
+		else:
+			check(asset.unlock_req == StringName(Progression.LADDER[i - 1]), "%s unlock_req points at %s" % [Progression.LADDER[i], Progression.LADDER[i - 1]])
+		check(Progression.mapped_car(Progression.LADDER[i]) != "", "rung %s maps a reward car" % Progression.LADDER[i])
+	check(Progression.mapped_car("bogus_event") == "", "unknown event maps no car")
+	check(Progression.next_event_after("alley_sprint") == "", "final rung has no next event")
+	check(Progression.next_event_after("bogus_event") == "", "unknown event has no next event")
+	var win := Progression.apply_result("harbor_sprint", 1)
+	check((win.get("unlocked_cars", []) as Array).has("coupe"), "P1 on harbor grants coupe")
+	check(str(win.get("car_unlocked", "")) == "coupe", "snapshot names coupe")
+	check(str(win.get("event_unlocked", "")) == "downtown_gp", "P1 also opens the next event")
+	check(GarageUI.is_car_unlocked("coupe"), "garage opens coupe after the win")
+	check(not GarageUI.is_car_unlocked("hatch"), "hatch stays locked after one win")
+	check(GarageUI.is_car_unlocked("sedan"), "sedan stays open")
+	var p3 := Progression.apply_result("downtown_gp", 3)
+	check(str(p3.get("event_unlocked", "")) == "neon_loop", "P3 on downtown opens neon_loop")
+	check(str(p3.get("car_unlocked", "")) == "", "P3 adds no car")
+	var again := Progression.apply_result("harbor_sprint", 1)
+	var cars := again.get("unlocked_cars", []) as Array
+	var count := 0
+	for c in cars:
+		if str(c) == "coupe":
+			count += 1
+	check(count == 1, "repeated P1 adds no duplicate coupe (count %d)" % count)
+	check(str(again.get("car_unlocked", "")) == "", "repeat P1 reports no fresh car")
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the wrapper check")
+	if script != null:
+		var gs = script.new()
+		var wrapped: Dictionary = gs.apply_result("neon_loop", 1)
+		check((wrapped.get("unlocked_cars", []) as Array).has("awd"), "wrapper P1 on neon grants awd")
+		check((gs.get("unlocked_cars") as Array).has("awd"), "wrapper refreshes the unlocked_cars cache")
+		check((gs.get("unlocked_events") as Array).has("neon_loop"), "wrapper refreshes the unlocked_events cache")
+		var bayline := load("res://assets/events/bayline_circuit.tres") as RaceEvent
+		check(bayline != null, "bayline_circuit loads as RaceEvent")
+		if bayline != null:
+			check(MenuUI.is_unlocked(bayline), "wrapper P1 on neon opens bayline in the menu")
+		gs.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "car probe restores defaults")
 	return true
 
 func hud_subscribes_to_race_signals() -> bool:
