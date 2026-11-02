@@ -1564,6 +1564,17 @@ func test_event_press_writes_current_event() -> bool:
 	await process_frame
 	await process_frame
 	check(StringName(gs.get("current_event")) == resolved, "pressing %s writes current_event" % String(resolved))
+	var navigated := current_scene
+	var navigated_grid := navigated.find_child("CarGrid", true, false) as GridContainer if navigated != null else null
+	for _i in 40:
+		if navigated_grid != null and is_instance_valid(navigated_grid) and navigated_grid.get_child_count() >= 4:
+			break
+		await process_frame
+	if navigated != null and navigated != instance and is_instance_valid(navigated):
+		if navigated.get_parent() == root:
+			root.remove_child(navigated)
+		navigated.free()
+		await process_frame
 	gs.set("current_event", prev)
 	root.remove_child(instance)
 	instance.free()
@@ -1578,6 +1589,17 @@ func test_event_press_writes_current_event() -> bool:
 		detached._on_event_chosen(String(resolved))
 		await process_frame
 		check(StringName(gs.get("current_event")) == resolved, "detached _on_event_chosen writes current_event %s" % String(resolved))
+		var navigated_detached := current_scene
+		var detached_grid := navigated_detached.find_child("CarGrid", true, false) as GridContainer if navigated_detached != null else null
+		for _i in 40:
+			if detached_grid != null and is_instance_valid(detached_grid) and detached_grid.get_child_count() >= 4:
+				break
+			await process_frame
+		if navigated_detached != null and navigated_detached != detached and is_instance_valid(navigated_detached):
+			if navigated_detached.get_parent() == root:
+				root.remove_child(navigated_detached)
+			navigated_detached.free()
+			await process_frame
 		gs.set("current_event", prev)
 		root.remove_child(detached)
 		detached.free()
