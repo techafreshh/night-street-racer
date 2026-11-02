@@ -4,9 +4,10 @@ extends Node
 ## Loads standalone (no _ready dependencies) so headless tests can
 ## instantiate it without entering the scene tree.
 ## Selection persists across restarts via SaveSystem (user://save.json):
-## _ready() loads the last saved selection, the selected_car/current_event
-## setters persist on every change, and select_event()/select_car() are the
-## typed writer APIs (menu.gd uses select_event). Disk failures are silent
+## _ready() loads the last saved selection, the selected_car/selected_color/
+## current_event setters persist on every change, and select_event()/
+## select_car()/select_color() are the typed writer APIs (menu.gd uses
+## select_event, garage.gd uses select_car/select_color). Disk failures are silent
 ## no-ops so standalone instances never error headless.
 
 ## Canonical default car id (owner of assets/cars/tunes/default_tune.tres,
@@ -22,6 +23,13 @@ var selected_car: StringName = &"":
 		_persist()
 	get:
 		return selected_car
+
+var selected_color: int = 0:
+	set(value):
+		selected_color = value
+		_persist()
+	get:
+		return selected_color
 
 var current_event: StringName = &"":
 	set(value):
@@ -45,6 +53,11 @@ func select_car(car_id: String) -> void:
 	selected_car = StringName(car_id)
 
 
+## Typed writer: record the chosen paint index and persist it.
+func select_color(color_idx: int) -> void:
+	selected_color = color_idx
+
+
 ## Re-read user://save.json into both vars. Missing or corrupt files fall
 ## back to defaults without erroring, and write-back stays suppressed.
 func reload_from_disk() -> void:
@@ -52,6 +65,7 @@ func reload_from_disk() -> void:
 	var data := SaveSystem.load_game()
 	var progress: Dictionary = data.get("progress", {})
 	selected_car = StringName(str(progress.get("selected_car", &"")))
+	selected_color = int(progress.get("selected_color", 0))
 	current_event = StringName(str(progress.get("current_event", &"")))
 	_loading = false
 
@@ -64,6 +78,7 @@ func _persist() -> void:
 	var data := SaveSystem.load_game()
 	var progress: Dictionary = data.get("progress", {})
 	progress["selected_car"] = str(selected_car)
+	progress["selected_color"] = selected_color
 	progress["current_event"] = str(current_event)
 	data["progress"] = progress
 	SaveSystem.save_game(data)

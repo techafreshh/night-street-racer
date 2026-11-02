@@ -41,6 +41,9 @@ func _run_all() -> void:
 		"test_garage_writes_selected_car",
 		"test_gamestate_typed_writers",
 		"test_garage_writes_via_typed_api",
+		"test_garage_scene_loads",
+		"test_garage_car_grid",
+		"test_garage_color_persists",
 		"test_event_select_grid",
 		"test_event_press_writes_current_event",
 		"test_event_select_grid_skips_invalid",
@@ -418,6 +421,200 @@ func test_garage_writes_via_typed_api() -> bool:
 	instance.free()
 	await process_frame
 	gs.set("selected_car", prev_car)
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
+	return true
+
+func test_garage_scene_loads() -> bool:
+	var packed = load("res://scenes/ui/garage.tscn")
+	check(packed is PackedScene, "garage.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "garage instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "Garage", "root node is Garage")
+	var preview := instance.find_child("CarPreview", true, false)
+	check(preview is SubViewport, "CarPreview is a SubViewport")
+	var swatches := instance.find_child("ColorSwatches", true, false)
+	check(swatches != null, "garage has ColorSwatches")
+	if swatches != null:
+		var buttons := 0
+		for child in swatches.get_children():
+			if child is BaseButton:
+				buttons += 1
+		check(buttons >= 4, "ColorSwatches holds >= 4 Buttons (got %d)" % buttons)
+		for i in 4:
+			check(swatches.get_node_or_null("Color%d" % i) is BaseButton, "ColorSwatches has Color%d" % i)
+	check(instance.find_child("CarGrid", true, false) is GridContainer, "garage has a CarGrid")
+	check(instance.find_child("CarInfo", true, false) is Label, "garage has a CarInfo label")
+	check(instance.find_child("BackButton", true, false) is BaseButton, "garage has a BackButton")
+	var src := FileAccess.get_file_as_string("res://scripts/ui/garage.gd")
+	check(src.contains("GARAGE_READY"), "garage script prints GARAGE_READY")
+	check(src.contains("select_car"), "garage script routes car writes through select_car")
+	check(src.contains("select_color"), "garage script routes color writes through select_color")
+	check(src.contains("CAR_SELECTED"), "garage script prints the CAR_SELECTED token")
+	check(src.contains("COLOR_SELECTED"), "garage script prints the COLOR_SELECTED token")
+	check(not src.contains("gs.set(\"selected_car\""), "garage script has no untyped selected_car writer")
+	check(not src.contains("gs.set(\"selected_color\""), "garage script has no untyped selected_color writer")
+	for banned in ["_physics_process", "apply_force", "apply_central_force", "linear_velocity", "angular_velocity", "RayCast", "PhysicsDirectBodyState3D"]:
+		check(not src.contains(banned), "garage script carries no %s" % banned)
+	instance.free()
+	return true
+
+func test_garage_car_grid() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "garage grid probe starts from defaults")
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for garage grid")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable for garage grid")
+	if gs == null:
+		return true
+	check(GarageUI.is_car_unlocked("sedan"), "sedan is always unlocked")
+	check(not GarageUI.is_car_unlocked("coupe"), "coupe is locked with an empty unlock list")
+	check(not GarageUI.is_car_unlocked("hatch"), "hatch is locked with an empty unlock list")
+	check(not GarageUI.is_car_unlocked("awd"), "awd is locked with an empty unlock list")
+	var unlock_data := SaveSystem.load_game()
+	var unlock_progress: Dictionary = unlock_data["progress"]
+	unlock_progress["unlocked_cars"] = ["coupe"]
+	unlock_data["progress"] = unlock_progress
+	check(SaveSystem.save_game(unlock_data), "unlock probe grants coupe")
+	check(GarageUI.is_car_unlocked("coupe"), "unlocked_cars opens coupe")
+	check(not GarageUI.is_car_unlocked("hatch"), "hatch stays locked without a grant")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "unlock probe restores defaults")
+	gs.set("selected_car", &"")
+	gs.set("selected_color", 0)
+	var packed = load("res://scenes/ui/garage.tscn")
+	check(packed is PackedScene, "garage.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var grid := instance.find_child("CarGrid", true, false) as GridContainer
+	check(grid != null, "garage has a CarGrid")
+	if grid == null:
+		root.remove_child(instance)
+		instance.free()
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	check(grid.get_child_count() == 4, "grid holds 4 car buttons (got %d)" % grid.get_child_count())
+	var stems: Array[String] = ["sedan", "coupe", "hatch", "awd"]
+	var names := {"sedan": "Sedan", "coupe": "Coupe", "hatch": "Hatch", "awd": "AWD"}
+	for stem in stems:
+		var btn := instance.find_child("Car_" + stem, true, false) as BaseButton
+		check(btn != null, "grid has a button for %s" % stem)
+		if btn == null:
+			continue
+		check((btn as Button).text.contains(str(names[stem])), "button text names %s" % stem)
+	var sedan := instance.find_child("Car_sedan", true, false) as BaseButton
+	check(sedan != null, "grid has Car_sedan")
+	if sedan != null:
+		check(sedan.disabled == false, "sedan stays enabled")
+		check(sedan.focus_mode != Control.FOCUS_NONE, "sedan stays focusable")
+	for stem in ["coupe", "hatch", "awd"]:
+		var locked := instance.find_child("Car_" + stem, true, false) as BaseButton
+		check(locked != null, "grid has Car_%s" % stem)
+		if locked != null:
+			check(locked.disabled, "%s is locked while not unlocked" % stem)
+			check(locked.focus_mode == Control.FOCUS_NONE, "%s skips focus while locked" % stem)
+	if sedan != null:
+		sedan.pressed.emit()
+		await process_frame
+		await process_frame
+		check(StringName(gs.get("selected_car")) == &"sedan", "pressing Car_sedan writes selected_car")
+	var info := instance.find_child("CarInfo", true, false) as Label
+	check(info != null and info.text.contains("Sedan"), "CarInfo names the picked car")
+	if info != null:
+		check(info.text.contains("Nm"), "CarInfo shows the live torque stat")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	check(SaveSystem.save_game(SaveSystem.default_data()), "garage grid probe restores defaults")
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
+	return true
+
+func test_garage_color_persists() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "color probe starts from defaults")
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for color probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable for color probe")
+	if gs == null:
+		return true
+	check(gs.has_method("select_color"), "GameState exposes select_color")
+	gs.set("selected_car", &"sedan")
+	gs.set("selected_color", 0)
+	var packed = load("res://scenes/ui/garage.tscn")
+	check(packed is PackedScene, "garage.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var swatch := instance.find_child("Color2", true, false) as BaseButton
+	check(swatch != null, "swatches have Color2")
+	if swatch == null:
+		root.remove_child(instance)
+		instance.free()
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	swatch.pressed.emit()
+	await process_frame
+	await process_frame
+	check(int(gs.get("selected_color")) == 2, "swatch press writes selected_color")
+	gs.reload_from_disk()
+	check(int(gs.get("selected_color")) == 2, "selected_color survives reload_from_disk")
+	var preview := instance.find_child("CarPreview", true, false) as SubViewport
+	check(preview != null, "garage keeps its CarPreview")
+	var painted := -1
+	if preview != null:
+		var pivot := preview.get_node_or_null("PreviewPivot") as Node3D
+		check(pivot != null, "CarPreview hosts a PreviewPivot")
+		if pivot != null:
+			for child in pivot.get_children():
+				var paint := (child as Node).get_node_or_null("CarPaint")
+				if paint != null:
+					painted = int(paint.get("color_index"))
+	check(painted == 2, "preview CarPaint.color_index matches the swatch (got %d)" % painted)
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	check(SaveSystem.save_game(SaveSystem.default_data()), "color probe restores defaults")
 	if mounted:
 		root.remove_child(gs)
 		gs.free()
