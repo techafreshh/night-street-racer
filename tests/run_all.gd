@@ -294,6 +294,17 @@ func test_save_system_roundtrip() -> bool:
 	check(str(loaded_progress.get("selected_car")) == "hatch", "roundtrip keeps selected_car")
 	check(str(loaded_progress.get("current_event")) == "neon_loop", "roundtrip keeps current_event")
 	check(int(loaded.get("version")) == SaveSystem.SAVE_VERSION, "roundtrip keeps version")
+	var future := SaveSystem.default_data()
+	future["version"] = SaveSystem.SAVE_VERSION + 1
+	(future["progress"] as Dictionary)["selected_car"] = "coupe"
+	(future["progress"] as Dictionary)["current_event"] = "neon_loop"
+	check(SaveSystem.save_game(future), "save_game writes a future-version doc")
+	var future_loaded := SaveSystem.load_game()
+	check(int(future_loaded.get("version")) == SaveSystem.SAVE_VERSION + 1, "future version survives load")
+	check(not SaveSystem.validate(future_loaded), "future version fails SaveSystem.validate()")
+	check(str((future_loaded["progress"] as Dictionary).get("selected_car")) == "coupe", "future version keeps selected_car")
+	check(str((future_loaded["progress"] as Dictionary).get("current_event")) == "neon_loop", "future version keeps current_event")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "future-version probe restores defaults")
 	var corrupt := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
 	check(corrupt != null, "save path opens for the corruption probe")
 	if corrupt != null:
