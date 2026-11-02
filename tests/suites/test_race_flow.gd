@@ -85,8 +85,8 @@ func test_checkpoints_validate_in_order() -> bool:
 		entry = dir.get_next()
 	dir.list_dir_end()
 	stems.sort()
-	ctx.check(stems.size() == 5, "assets/events holds exactly 5 .tres files (got %d)" % stems.size())
-	var wanted: Array[String] = ["alley_sprint", "bayline_circuit", "downtown_gp", "harbor_sprint", "neon_loop"]
+	ctx.check(stems.size() == 6, "assets/events holds exactly 6 .tres files (got %d)" % stems.size())
+	var wanted: Array[String] = ["alley_sprint", "bayline_circuit", "downtown_gp", "drift_park", "harbor_sprint", "neon_loop"]
 	for w in wanted:
 		ctx.check(stems.has(w), "event resource present: %s" % w)
 	for stem in stems:
@@ -130,7 +130,7 @@ func test_checkpoints_validate_in_order() -> bool:
 			ctx.check(gate.get_node_or_null("CollisionShape3D") != null, "checkpoint has a CollisionShape3D")
 			ctx.check(gate.get_node_or_null("MeshInstance3D") != null, "checkpoint has a MeshInstance3D")
 			gate.free()
-	var routes: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]
+	var routes: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint", "drift_park"]
 	for stem in routes:
 		var packed = load("res://scenes/races/route_%s.tscn" % stem)
 		ctx.check(packed is PackedScene, "route_%s.tscn loads as PackedScene" % stem)
@@ -1022,7 +1022,10 @@ func top3_unlocks_next_event() -> bool:
 	var unknown := Progression.apply_result("bogus_event", 1)
 	ctx.check(str(unknown.get("event_unlocked", "")) == "", "unknown event unlocks nothing")
 	ctx.check(str(unknown.get("car_unlocked", "")) == "", "unknown event grants no car")
-	var last := Progression.apply_result("alley_sprint", 1)
+	var penultimate := Progression.apply_result("alley_sprint", 3)
+	ctx.check(str(penultimate.get("event_unlocked", "")) == "drift_park", "P3 on alley opens drift_park")
+	ctx.check(str(penultimate.get("car_unlocked", "")) == "", "P3 on alley grants no car")
+	var last := Progression.apply_result("drift_park", 1)
 	ctx.check(str(last.get("event_unlocked", "")) == "", "final rung P1 opens no next event")
 	ctx.check(str(last.get("car_unlocked", "")) != "", "final rung P1 still grants a car")
 	var script = load("res://scripts/game/GameState.gd")
@@ -1053,7 +1056,8 @@ func win_unlocks_car() -> bool:
 			ctx.check(asset.unlock_req == StringName(Progression.LADDER[i - 1]), "%s unlock_req points at %s" % [Progression.LADDER[i], Progression.LADDER[i - 1]])
 		ctx.check(Progression.mapped_car(Progression.LADDER[i]) != "", "rung %s maps a reward car" % Progression.LADDER[i])
 	ctx.check(Progression.mapped_car("bogus_event") == "", "unknown event maps no car")
-	ctx.check(Progression.next_event_after("alley_sprint") == "", "final rung has no next event")
+	ctx.check(Progression.next_event_after("alley_sprint") == "drift_park", "alley opens drift_park")
+	ctx.check(Progression.next_event_after("drift_park") == "", "final rung has no next event")
 	ctx.check(Progression.next_event_after("bogus_event") == "", "unknown event has no next event")
 	var win := Progression.apply_result("harbor_sprint", 1)
 	ctx.check((win.get("unlocked_cars", []) as Array).has("coupe"), "P1 on harbor grants coupe")
@@ -1157,7 +1161,7 @@ func test_pause_toggle_freezes_tree() -> bool:
 	return true
 
 func test_race_scene_boots() -> bool:
-	var stems: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]
+	var stems: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint", "drift_park"]
 	for stem in stems:
 		var packed = load("res://scenes/races/race_%s.tscn" % stem)
 		ctx.check(packed is PackedScene, "race_%s.tscn loads as PackedScene" % stem)
@@ -1201,7 +1205,7 @@ func test_event_to_garage_flow() -> bool:
 	if gs == null:
 		return true
 	var resolved := &""
-	for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]:
+	for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint", "drift_park"]:
 		var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
 		if ev != null and MenuUI.is_unlocked(ev):
 			resolved = StringName(stem)
