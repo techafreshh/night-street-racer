@@ -23,7 +23,8 @@ const REWARD_CARS: Array[String] = ["coupe", "hatch", "awd"]
 
 
 ## Coerce any saved value to a clean string list: non-Array yields empty,
-## non-String entries are dropped, StringName entries fold to String.
+## non-String/non-StringName entries and empty strings are dropped,
+## StringName entries fold to String.
 static func _string_list(v: Variant) -> Array[String]:
 	var out: Array[String] = []
 	if not (v is Array):
