@@ -34,6 +34,7 @@ func _run_all() -> void:
 		"test_input_actions",
 		"test_gamestate_standalone",
 		"test_save_system_roundtrip",
+		"test_gamestate_rejects_nonint_color",
 		"test_save_system_partial_settings_merge",
 		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
@@ -304,6 +305,42 @@ func test_save_system_roundtrip() -> bool:
 	check(str(fallback_progress.get("selected_car")) == "", "corrupt fallback resets selected_car")
 	check(str(fallback_progress.get("current_event")) == "", "corrupt fallback resets current_event")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "save restores defaults after the probe")
+	return true
+
+func test_gamestate_rejects_nonint_color() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the color coercion probe")
+	if script == null:
+		return true
+	var bad_bool := SaveSystem.default_data()
+	(bad_bool["progress"] as Dictionary)["selected_color"] = true
+	check(SaveSystem.save_game(bad_bool), "save_game writes bool selected_color probe")
+	var probe_bool = script.new()
+	probe_bool.reload_from_disk()
+	check(int(probe_bool.get("selected_color")) == 0, "bool selected_color reloads to the safe default")
+	probe_bool.free()
+	var bad_string := SaveSystem.default_data()
+	(bad_string["progress"] as Dictionary)["selected_color"] = "2"
+	check(SaveSystem.save_game(bad_string), "save_game writes String selected_color probe")
+	var probe_string = script.new()
+	probe_string.reload_from_disk()
+	check(int(probe_string.get("selected_color")) == 0, "String selected_color reloads to the safe default")
+	probe_string.free()
+	var good_float := SaveSystem.default_data()
+	(good_float["progress"] as Dictionary)["selected_color"] = 2.0
+	check(SaveSystem.save_game(good_float), "save_game writes float selected_color probe")
+	var probe_float = script.new()
+	probe_float.reload_from_disk()
+	check(int(probe_float.get("selected_color")) == 2, "float selected_color still loads")
+	probe_float.free()
+	var good_int := SaveSystem.default_data()
+	(good_int["progress"] as Dictionary)["selected_color"] = 2
+	check(SaveSystem.save_game(good_int), "save_game writes int selected_color probe")
+	var probe_int = script.new()
+	probe_int.reload_from_disk()
+	check(int(probe_int.get("selected_color")) == 2, "int selected_color still loads")
+	probe_int.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "color coercion probe restores defaults")
 	return true
 
 func test_save_system_partial_settings_merge() -> bool:
