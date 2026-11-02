@@ -38,6 +38,7 @@ func _run_all() -> void:
 		"test_menu_buttons",
 		"test_garage_writes_selected_car",
 		"test_event_select_grid",
+		"test_event_press_writes_current_event",
 		"test_event_select_grid_skips_invalid",
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
@@ -378,6 +379,49 @@ func test_event_select_grid() -> bool:
 	root.remove_child(instance)
 	instance.free()
 	await process_frame
+	return true
+
+func test_event_press_writes_current_event() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	check(packed is PackedScene, "event_select.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "event select instantiates for press test")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var gs: Node = root.get_node_or_null("GameState")
+	check(gs != null, "GameState singleton is reachable for event press")
+	if gs == null:
+		root.remove_child(instance)
+		instance.free()
+		return true
+	var prev := StringName(gs.get("current_event"))
+	var btn := instance.find_child("Event_harbor_sprint", true, false) as BaseButton
+	check(btn != null, "grid has Event_harbor_sprint button")
+	if btn == null:
+		gs.set("current_event", prev)
+		root.remove_child(instance)
+		instance.free()
+		return true
+	check(btn.disabled == false, "harbor_sprint button is unlocked for press test")
+	btn.pressed.emit()
+	await process_frame
+	await process_frame
+	check(StringName(gs.get("current_event")) == &"harbor_sprint", "pressing harbor_sprint writes current_event")
+	gs.set("current_event", prev)
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	var detached := MenuUI.new()
+	check(detached != null, "detached MenuUI instantiates")
+	if detached != null:
+		detached._on_event_chosen("harbor_sprint")
+		check(true, "detached _on_event_chosen completes without error")
+		detached.free()
 	return true
 
 func test_event_select_grid_skips_invalid() -> bool:
