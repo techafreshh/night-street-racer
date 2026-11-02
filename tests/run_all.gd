@@ -35,6 +35,7 @@ func _run_all() -> void:
 		"test_gamestate_standalone",
 		"test_save_system_roundtrip",
 		"test_gamestate_rejects_nonint_color",
+		"test_save_system_drops_unknown_settings_keys",
 		"test_save_system_partial_settings_merge",
 		"test_save_system_preserves_unknown_top_level_keys",
 		"test_save_system_rejects_nonstring_selection",
@@ -399,6 +400,32 @@ func test_save_system_partial_settings_merge() -> bool:
 	for key: String in ["music_volume", "sfx_volume", "assists", "camera_shake"]:
 		check(loaded_settings.get(key) == default_settings.get(key), "partial merge fills default %s" % key)
 	check(SaveSystem.save_game(SaveSystem.default_data()), "partial settings probe restores defaults")
+	return true
+
+func test_save_system_drops_unknown_settings_keys() -> bool:
+	var defaults := SaveSystem.default_data()
+	var default_settings: Dictionary = defaults["settings"]
+	var raw := {
+		"version": SaveSystem.SAVE_VERSION,
+		"settings": {"master_volume": 0.3, "music_volume": 0.7, "bogus_key": 123, " aimbot": true},
+		"progress": (defaults["progress"] as Dictionary).duplicate(true),
+		"records": {},
+	}
+	var probe := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(probe != null, "save path opens for the unknown settings probe")
+	if probe != null:
+		probe.store_string(JSON.stringify(raw))
+		probe.close()
+	var loaded := SaveSystem.load_game()
+	var loaded_settings: Dictionary = loaded["settings"]
+	check(absf(float(loaded_settings.get("master_volume", -1.0)) - 0.3) < 0.001, "unknown-settings merge keeps the saved master_volume")
+	check(loaded_settings.get("music_volume") == default_settings.get("music_volume"), "unknown-settings merge keeps known music_volume")
+	for key: String in ["sfx_volume", "assists", "camera_shake"]:
+		check(loaded_settings.get(key) == default_settings.get(key), "unknown-settings merge fills default %s" % key)
+	check(not loaded_settings.has("bogus_key"), "unknown settings key bogus_key is dropped")
+	check(not loaded_settings.has(" aimbot"), "unknown settings key with space is dropped")
+	check(SaveSystem.validate(loaded), "unknown settings keys load back valid")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "unknown settings probe restores defaults")
 	return true
 
 func test_save_system_preserves_unknown_top_level_keys() -> bool:

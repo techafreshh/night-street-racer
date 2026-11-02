@@ -137,6 +137,8 @@ static func save_game(data: Dictionary) -> bool:
 ## Read the save document. Missing, unreadable, or corrupt files fall back
 ## to default_data(); valid documents merge leniently over the defaults so
 ## unknown future versions (and partial files) still apply their known keys.
+## The settings overlay is allow-listed to the default_data() settings keys;
+## unknown settings keys are discarded.
 ## Unknown top-level keys carry through verbatim for forward-compat (known
 ## keys still merge over defaults; version stamp behavior unchanged).
 ## A numeric future version carries through as int so validate() still
@@ -161,7 +163,8 @@ static func load_game() -> Dictionary:
 		var merged_settings: Dictionary = merged["settings"]
 		var saved_settings: Dictionary = raw["settings"]
 		for key: Variant in saved_settings.keys():
-			merged_settings[key] = saved_settings[key]
+			if merged_settings.has(key):
+				merged_settings[key] = saved_settings[key]
 	if raw.get("progress") is Dictionary:
 		var progress: Dictionary = merged["progress"]
 		var saved_progress: Dictionary = raw["progress"]
