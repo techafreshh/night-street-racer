@@ -29,6 +29,7 @@ func get_test_names() -> Array[String]:
 		"test_gamestate_reload_rejects_non_numeric_color",
 		"test_gamestate_selected_car_default",
 		"settings_persist_across_load",
+		"test_gamestate_select_mode_validates",
 	]
 	return names
 
@@ -672,6 +673,63 @@ func test_gamestate_selected_car_default() -> bool:
 	var car_packed = load("res://scenes/vehicles/car_sedan.tscn")
 	ctx.check(car_packed is PackedScene, "default car scene car_sedan.tscn loads")
 	return true
+
+func test_gamestate_select_mode_validates() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	ctx.check(script != null, "GameState.gd loads for the mode validation probe")
+	if script == null:
+		return true
+	ctx.check(script.get("MODE_RACE") == &"race", "MODE_RACE is race")
+	ctx.check(script.get("MODE_TIME_TRIAL") == &"time_trial", "MODE_TIME_TRIAL is time_trial")
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "mode probe starts from defaults")
+	var node = script.new()
+	ctx.check(node != null, "GameState instantiates standalone for the mode probe")
+	if node == null:
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	ctx.check(StringName(node.get("current_mode")) == &"race", "fresh instance defaults to race")
+	ctx.check(node.is_time_trial_mode() == false, "race default is not time-trial mode")
+	ctx.check(node.is_valid_mode(&"race"), "race passes is_valid_mode")
+	ctx.check(node.is_valid_mode(&"time_trial"), "time_trial passes is_valid_mode")
+	ctx.check(not node.is_valid_mode(&"bogus"), "bogus fails is_valid_mode")
+	ctx.check(not node.is_valid_mode(&""), "empty fails is_valid_mode")
+	ctx.check(not node.is_valid_mode(&"RACE"), "wrong case fails is_valid_mode")
+	node.select_mode("time_trial")
+	ctx.check(StringName(node.get("current_mode")) == &"time_trial", "valid time_trial selection sticks")
+	ctx.check(node.is_time_trial_mode(), "time_trial selection reads as time-trial mode")
+	node.select_mode("bogus")
+	ctx.check(StringName(node.get("current_mode")) == &"time_trial", "bogus selection keeps the last valid mode")
+	ctx.check(node.is_time_trial_mode(), "bogus selection still reads as time-trial mode")
+	node.select_mode("")
+	ctx.check(StringName(node.get("current_mode")) == &"time_trial", "empty selection keeps the last valid mode")
+	node.select_mode("RACE")
+	ctx.check(StringName(node.get("current_mode")) == &"time_trial", "wrong-case selection keeps the last valid mode")
+	node.select_mode(" time_trial")
+	ctx.check(StringName(node.get("current_mode")) == &"time_trial", "whitespace selection keeps the last valid mode")
+	node.select_mode("race")
+	ctx.check(StringName(node.get("current_mode")) == &"race", "valid race selection sticks back")
+	ctx.check(node.is_time_trial_mode() == false, "race selection is not time-trial mode")
+	node.select_mode("bogus")
+	ctx.check(StringName(node.get("current_mode")) == &"race", "bogus from race keeps race")
+	node.select_mode("time_trial")
+	node.flush()
+	var data := SaveSystem.load_game()
+	var progress: Dictionary = data.get("progress", {})
+	ctx.check(not progress.has("current_mode"), "flush writes no current_mode progress key")
+	ctx.check(not data.has("current_mode"), "flush writes no top-level current_mode key")
+	ctx.check(SaveSystem.validate(data), "doc without a mode key still validates")
+	node.reload_from_disk()
+	ctx.check(StringName(node.get("current_mode")) == &"time_trial", "reload preserves the in-memory mode")
+	var fresh = script.new()
+	ctx.check(fresh != null, "fresh instance instantiates after a mode run")
+	if fresh != null:
+		ctx.check(StringName(fresh.get("current_mode")) == &"race", "fresh instance defaults to race after a mode run")
+		fresh.free()
+	node.flush()
+	node.free()
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "mode probe restores defaults")
+	return true
+
 
 func settings_persist_across_load() -> bool:
 	var script = load("res://scripts/game/settings.gd")
