@@ -95,4 +95,4 @@ script = ExtResource("3")
 
 [node name="CarPaint" type="Node" parent="."]
 script = ExtResource("6")
-body_color = Color(0.1, 0.6, 0.2, 1)
+color_index = 3

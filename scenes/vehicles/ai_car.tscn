@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="Script" path="res://scripts/vehicles/vehicle_controller.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/vehicles/chase_camera.gd" id="2"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://scripts/ai/ai_input.gd" id="5"]
 [ext_resource type="Resource" path="res://assets/city/test_line.tres" id="6"]
 [ext_resource type="Script" path="res://scripts/ai/rubber_band.gd" id="7"]
+[ext_resource type="Script" path="res://scripts/vehicles/car_paint.gd" id="8"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_1"]
 size = Vector3(1.8, 0.5, 4.2)
@@ -111,3 +112,7 @@ racing_line = ExtResource("6")
 [node name="RubberBand" type="Node" parent="."]
 script = ExtResource("7")
 racing_line = ExtResource("6")
+
+[node name="CarPaint" type="Node" parent="."]
+script = ExtResource("8")
+color_index = 1

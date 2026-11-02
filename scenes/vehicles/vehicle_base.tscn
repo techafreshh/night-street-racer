@@ -1,9 +1,10 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://scripts/vehicles/vehicle_controller.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/vehicles/chase_camera.gd" id="2"]
 [ext_resource type="Script" path="res://scripts/vehicles/assists.gd" id="3"]
 [ext_resource type="Resource" path="res://assets/cars/tunes/default_tune.tres" id="4"]
+[ext_resource type="Script" path="res://scripts/vehicles/car_paint.gd" id="5"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_1"]
 size = Vector3(1.8, 0.5, 4.2)
@@ -99,3 +100,7 @@ script = ExtResource("2")
 
 [node name="Assists" type="Node" parent="."]
 script = ExtResource("3")
+
+[node name="CarPaint" type="Node" parent="."]
+script = ExtResource("5")
+color_index = 0
