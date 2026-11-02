@@ -1,0 +1,37 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/ui/menu.gd" id="1"]
+
+[node name="EventSelect" type="Node"]
+script = ExtResource("1")
+menu_mode = 1
+
+[node name="Title" type="Label" parent="."]
+offset_right = 640.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 40
+text = "SELECT EVENT"
+horizontal_alignment = 1
+
+[node name="EventGrid" type="GridContainer" parent="."]
+offset_top = 80.0
+offset_right = 680.0
+offset_bottom = 400.0
+columns = 2
+theme_override_constants/h_separation = 16
+theme_override_constants/v_separation = 12
+
+[node name="BackButton" type="Button" parent="."]
+offset_top = 420.0
+offset_right = 320.0
+offset_bottom = 468.0
+custom_minimum_size = Vector2(320, 48)
+theme_override_font_sizes/font_size = 24
+text = "Back"
+
+[node name="InfoLabel" type="Label" parent="."]
+offset_top = 480.0
+offset_right = 640.0
+offset_bottom = 510.0
+theme_override_font_sizes/font_size = 18
+text = "Choose an event"
