@@ -132,12 +132,13 @@ func _process(_delta: float) -> void:
 	hud.call("set_delta", _manager.race_time - _cached_best)
 
 
-## True when GameState selects the solo time-trial mode.
+## True when GameState selects the solo time-trial mode (single spelling:
+## GameState.is_time_trial_mode()).
 func _is_time_trial() -> bool:
 	var gs := get_node_or_null("/root/GameState")
 	if gs == null:
 		return false
-	return TimeTrial.is_time_trial_mode(gs.get("current_mode"))
+	return gs.has_method("is_time_trial_mode") and bool(gs.call("is_time_trial_mode"))
 
 
 ## Bind the route gates to the manager flow, subscribe the finish handoff,

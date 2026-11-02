@@ -18,6 +18,7 @@ func get_test_names() -> Array[String]:
 		"timetrial_mode_field_present",
 		"timetrial_hud_delta_formats",
 		"timetrial_race_to_results_keeps_banner",
+		"timetrial_single_mode_predicate",
 	]
 	return names
 
@@ -59,8 +60,16 @@ func timetrial_mode_field_present() -> bool:
 	if base == null:
 		return true
 	ctx.check(not RaceEvent.is_time_trial(base), "default race asset is not a time-trial")
-	ctx.check(TimeTrial.is_time_trial_mode(&"time_trial"), "time_trial names the solo mode")
-	ctx.check(not TimeTrial.is_time_trial_mode(&"race"), "race is not the solo mode")
+	var gs_script = load("res://scripts/game/GameState.gd")
+	ctx.check(gs_script != null, "GameState.gd loads for the mode spelling probe")
+	if gs_script == null:
+		return true
+	var gs_node = gs_script.new()
+	gs_node.select_mode("time_trial")
+	ctx.check(gs_node.is_time_trial_mode(), "time_trial names the solo mode")
+	gs_node.select_mode("race")
+	ctx.check(not gs_node.is_time_trial_mode(), "race is not the solo mode")
+	gs_node.free()
 	var solo := base.duplicate() as RaceEvent
 	solo.mode = &"time_trial"
 	ctx.check(RaceEvent.validate(solo), "time_trial mode passes RaceEvent.validate()")
@@ -210,6 +219,62 @@ func timetrial_race_to_results_keeps_banner() -> bool:
 	await ctx.tree.process_frame
 	gs.call("clear_last_result")
 	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "banner probe restores defaults")
+	if mounted:
+		ctx.tree.root.remove_child(gs)
+		gs.free()
+		await ctx.tree.process_frame
+	return true
+
+func timetrial_single_mode_predicate() -> bool:
+	# Single-spelling pin: the solo-mode question lives only in
+	# GameState.is_time_trial_mode() and race.gd routes through it.
+	var race_src := FileAccess.get_file_as_string("res://scripts/race/race.gd")
+	ctx.check(race_src != "", "race.gd source loads for the single-spelling check")
+	ctx.check(not race_src.contains("TimeTrial.is_time_trial_mode"), "race never calls the TimeTrial static (single spelling)")
+	ctx.check(race_src.contains("has_method(\"is_time_trial_mode\")"), "race guards the GameState predicate before calling it")
+	ctx.check(race_src.contains("gs.call(\"is_time_trial_mode\")"), "race routes the solo question through the GameState node")
+	var tt_src := FileAccess.get_file_as_string("res://scripts/race/time_trial.gd")
+	ctx.check(tt_src != "", "time_trial.gd source loads for the single-spelling check")
+	ctx.check(not tt_src.contains("is_time_trial_mode"), "time_trial keeps no mode predicate (GameState owns the spelling)")
+	var race_script = load("res://scripts/race/race.gd")
+	ctx.check(race_script != null, "race.gd loads for the single-spelling probe")
+	if race_script == null:
+		return true
+	var race = race_script.new()
+	ctx.tree.root.add_child(race)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var pre: Node = ctx.tree.root.get_node_or_null("GameState")
+	if pre == null:
+		ctx.check(race._is_time_trial() == false, "race reads non-time-trial with no GameState singleton")
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		ctx.check(gs_script != null, "GameState.gd loads for the single-spelling probe")
+		if gs_script == null:
+			ctx.tree.root.remove_child(race)
+			race.free()
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		ctx.tree.root.add_child(gs)
+		mounted = true
+		await ctx.tree.process_frame
+	ctx.check(gs != null, "GameState singleton is reachable for the single-spelling probe")
+	if gs == null:
+		ctx.tree.root.remove_child(race)
+		race.free()
+		return true
+	gs.call("select_mode", "race")
+	ctx.check(race._is_time_trial() == false, "race default reads non-time-trial through GameState")
+	gs.call("select_mode", "time_trial")
+	ctx.check(race._is_time_trial() == true, "time_trial selection reads time-trial through race")
+	gs.call("select_mode", "race")
+	ctx.check(race._is_time_trial() == false, "race selection reads back non-time-trial through race")
+	gs.call("select_mode", "race")
+	ctx.tree.root.remove_child(race)
+	race.free()
 	if mounted:
 		ctx.tree.root.remove_child(gs)
 		gs.free()

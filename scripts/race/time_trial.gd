@@ -1,22 +1,12 @@
 class_name TimeTrial
 extends RefCounted
 ## Solo time-trial helper: best-time load/save-if-faster, live delta math
-## and formatting, and mode predicates. Pure-static, scene-free helper
+## and formatting. Pure-static, scene-free helper
 ## (like SaveSystem / Progression): reads/writes the SaveSystem
 ## records[event_id] = {"best_time_s": float, "best_position": int} table
 ## through load-modify-save round-trips so bests survive restarts.
 ## Headless-safe: never raises; invalid input is a false return.
 ## Live delta = race_time - best: negative means ahead, positive behind.
-
-## Run-mode aliases mirroring RaceEvent.MODE_RACE / MODE_TIME_TRIAL.
-const MODE_RACE := &"race"
-const MODE_TIME_TRIAL := &"time_trial"
-
-
-## True when the mode handle names the solo time-trial mode.
-static func is_time_trial_mode(m: Variant) -> bool:
-	return StringName(str(m)) == MODE_TIME_TRIAL
-
 
 ## Disk-free best lookup inside one records table: absent or corrupt
 ## entries read as -1.0 with no I/O of their own.
