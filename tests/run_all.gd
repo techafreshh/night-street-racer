@@ -123,10 +123,14 @@ func _run_all() -> void:
 	]
 	for t: String in tests:
 		await _run_test(t)
+	await _despawn_car()
 	_release_inputs()
 	if is_instance_valid(_ground):
-		_ground.queue_free()
+		_ground.free()
 		_ground = null
+	await process_frame
+	await process_frame
+	await physics_frame
 	print("Results: %d passed, %d failed" % [passed, failed])
 	if failed == 0:
 		print("ALL TESTS PASSED")
