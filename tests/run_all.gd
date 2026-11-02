@@ -39,7 +39,7 @@ func _run_all() -> void:
 		"test_save_system_partial_settings_merge",
 		"test_save_system_drops_unknown_progress_keys",
 		"test_save_system_records_per_entry_merge",
-		"test_save_system_preserves_unknown_top_level_keys",
+		"test_save_system_drops_unknown_top_level_keys",
 		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
 		"test_gamestate_reload_rejects_non_numeric_color",
@@ -501,45 +501,48 @@ func test_save_system_drops_unknown_settings_keys() -> bool:
 	check(SaveSystem.save_game(SaveSystem.default_data()), "unknown settings probe restores defaults")
 	return true
 
-func test_save_system_preserves_unknown_top_level_keys() -> bool:
+func test_save_system_drops_unknown_top_level_keys() -> bool:
 	var defaults := SaveSystem.default_data()
 	var default_settings: Dictionary = defaults["settings"]
 	var raw := {
-		"version": SaveSystem.SAVE_VERSION + 1,
+		"version": SaveSystem.SAVE_VERSION,
 		"settings": {"master_volume": 0.3},
 		"progress": (defaults["progress"] as Dictionary).duplicate(true),
 		"records": {},
 		"achievements_seen": true,
 		"garage_v2": {"spots": 3},
+		"extra_list": [1, 2, 3],
+		"extra_note": "hello",
 	}
 	(raw["progress"] as Dictionary)["selected_car"] = "hatch"
 	var probe := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
-	check(probe != null, "save path opens for the unknown-keys probe")
+	check(probe != null, "save path opens for the unknown top-level probe")
 	if probe != null:
 		probe.store_string(JSON.stringify(raw))
 		probe.close()
 	var loaded := SaveSystem.load_game()
-	check(loaded.get("achievements_seen") is bool, "unknown scalar key loads uncoerced")
-	check(bool(loaded.get("achievements_seen", false)) == true, "unknown scalar key survives load")
-	check(loaded.get("garage_v2") is Dictionary, "unknown Dictionary key survives load")
-	if loaded.get("garage_v2") is Dictionary:
-		check(int((loaded["garage_v2"] as Dictionary).get("spots", 0)) == 3, "unknown Dictionary value survives load")
-	check(int(loaded.get("version", 0)) == SaveSystem.SAVE_VERSION + 1, "future version stamp survives load with unknown keys")
-	check(not SaveSystem.validate(loaded), "future version with unknown keys still fails SaveSystem.validate()")
+	check(not loaded.has("achievements_seen"), "unknown scalar key achievements_seen is dropped")
+	check(not loaded.has("garage_v2"), "unknown Dictionary key garage_v2 is dropped")
+	check(not loaded.has("extra_list"), "unknown Array key extra_list is dropped")
+	check(not loaded.has("extra_note"), "unknown String key extra_note is dropped")
+	check(loaded.size() == 4, "only the four default_data() top-level keys survive")
 	var loaded_settings: Dictionary = loaded["settings"]
 	check(absf(float(loaded_settings.get("master_volume", -1.0)) - 0.3) < 0.001, "known saved master_volume kept alongside unknown keys")
 	for key: String in ["music_volume", "sfx_volume", "assists", "camera_shake"]:
 		check(loaded_settings.get(key) == default_settings.get(key), "missing setting fills default %s alongside unknown keys" % key)
 	check(str((loaded["progress"] as Dictionary).get("selected_car")) == "hatch", "known selected_car kept alongside unknown keys")
-	check(SaveSystem.save_game(loaded), "save_game rewrites the doc with unknown keys")
+	check(SaveSystem.validate(loaded), "dropped unknown keys load back valid")
+	check(SaveSystem.save_game(loaded), "save_game rewrites the doc after unknown keys were dropped")
 	var reloaded := SaveSystem.load_game()
-	check(bool(reloaded.get("achievements_seen", false)) == true, "unknown scalar key survives load-save-load")
-	check(reloaded.get("garage_v2") is Dictionary, "unknown Dictionary key survives load-save-load")
-	if reloaded.get("garage_v2") is Dictionary:
-		check(int((reloaded["garage_v2"] as Dictionary).get("spots", 0)) == 3, "unknown Dictionary value survives load-save-load")
-	check(int(reloaded.get("version", 0)) == SaveSystem.SAVE_VERSION + 1, "future version survives load-save-load with unknown keys")
-	check(str((reloaded["progress"] as Dictionary).get("selected_car")) == "hatch", "re-saved doc keeps selected_car alongside unknown keys")
-	check(SaveSystem.save_game(SaveSystem.default_data()), "unknown-keys probe restores defaults")
+	check(not reloaded.has("achievements_seen"), "unknown scalar key stays dropped after load-save-load")
+	check(not reloaded.has("garage_v2"), "unknown Dictionary key stays dropped after load-save-load")
+	check(not reloaded.has("extra_list"), "unknown Array key stays dropped after load-save-load")
+	check(not reloaded.has("extra_note"), "unknown String key stays dropped after load-save-load")
+	check(reloaded.size() == 4, "reloaded doc still holds only the four default_data() top-level keys")
+	check(absf(float((reloaded["settings"] as Dictionary).get("master_volume", -1.0)) - 0.3) < 0.001, "re-saved doc keeps master_volume")
+	check(str((reloaded["progress"] as Dictionary).get("selected_car")) == "hatch", "re-saved doc keeps selected_car")
+	check(SaveSystem.validate(reloaded), "reloaded doc without unknown keys still validates")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "unknown top-level probe restores defaults")
 	return true
 
 func test_save_system_rejects_nonstring_selection() -> bool:
