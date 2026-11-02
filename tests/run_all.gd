@@ -37,6 +37,7 @@ func _run_all() -> void:
 		"test_gamestate_rejects_nonint_color",
 		"test_save_system_drops_unknown_settings_keys",
 		"test_save_system_partial_settings_merge",
+		"test_save_system_drops_unknown_progress_keys",
 		"test_save_system_records_per_entry_merge",
 		"test_save_system_preserves_unknown_top_level_keys",
 		"test_save_system_rejects_nonstring_selection",
@@ -401,6 +402,37 @@ func test_save_system_partial_settings_merge() -> bool:
 	for key: String in ["music_volume", "sfx_volume", "assists", "camera_shake"]:
 		check(loaded_settings.get(key) == default_settings.get(key), "partial merge fills default %s" % key)
 	check(SaveSystem.save_game(SaveSystem.default_data()), "partial settings probe restores defaults")
+	return true
+
+func test_save_system_drops_unknown_progress_keys() -> bool:
+	var defaults := SaveSystem.default_data()
+	var default_progress: Dictionary = defaults["progress"]
+	var dirty_progress: Dictionary = (defaults["progress"] as Dictionary).duplicate(true)
+	dirty_progress["selected_car"] = "hatch"
+	dirty_progress["current_event"] = "neon_loop"
+	dirty_progress["bogus_key"] = 123
+	dirty_progress[" aimbot"] = true
+	var raw := {
+		"version": SaveSystem.SAVE_VERSION,
+		"settings": (defaults["settings"] as Dictionary).duplicate(true),
+		"progress": dirty_progress,
+		"records": {},
+	}
+	var probe := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(probe != null, "save path opens for the unknown progress probe")
+	if probe != null:
+		probe.store_string(JSON.stringify(raw))
+		probe.close()
+	var loaded := SaveSystem.load_game()
+	var loaded_progress: Dictionary = loaded["progress"]
+	check(str(loaded_progress.get("selected_car")) == "hatch", "unknown-progress merge keeps the saved selected_car")
+	check(str(loaded_progress.get("current_event")) == "neon_loop", "unknown-progress merge keeps the saved current_event")
+	for key: String in ["unlocked_events", "unlocked_cars", "selected_color"]:
+		check(loaded_progress.get(key) == default_progress.get(key), "unknown-progress merge fills default %s" % key)
+	check(not loaded_progress.has("bogus_key"), "unknown progress key bogus_key is dropped")
+	check(not loaded_progress.has(" aimbot"), "unknown progress key with space is dropped")
+	check(SaveSystem.validate(loaded), "unknown progress keys load back valid")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "unknown progress probe restores defaults")
 	return true
 
 func test_save_system_records_per_entry_merge() -> bool:
