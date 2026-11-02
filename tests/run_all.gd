@@ -444,6 +444,7 @@ func test_save_system_records_per_entry_merge() -> bool:
 		"progress": (defaults["progress"] as Dictionary).duplicate(true),
 		"records": {
 			"harbor_sprint": {"best_time_s": 93.24, "best_position": 1, "note": "pb"},
+			"note_only": {"note": "pb"},
 			"string_entry": "fast",
 			"empty_entry": {},
 			"bad_time_type": {"best_time_s": "fast", "best_position": 1},
@@ -465,14 +466,27 @@ func test_save_system_records_per_entry_merge() -> bool:
 		var entry: Dictionary = records["harbor_sprint"]
 		check(float(entry.get("best_time_s", 0.0)) == 93.24, "per-entry merge keeps best_time_s")
 		check(int(entry.get("best_position", 0)) == 1, "per-entry merge keeps best_position")
-		check(str(entry.get("note", "")) == "pb", "per-entry merge keeps unknown per-entry keys")
+		check(not entry.has("note"), "unknown per-entry key note is dropped")
+		check(entry.size() == 2, "sanitized entry holds only the two known keys")
 	check(not records.has("string_entry"), "corrupt String records entry is dropped")
 	check(not records.has("empty_entry"), "corrupt empty records entry is dropped")
 	check(not records.has("bad_time_type"), "corrupt best_time_s String entry is dropped")
 	check(not records.has("frac_position"), "corrupt fractional best_position entry is dropped")
 	check(not records.has("zero_time"), "corrupt zero best_time_s entry is dropped")
 	check(not records.has(""), "corrupt empty-key records entry is dropped")
+	check(not records.has("note_only"), "note-only records entry is dropped")
 	check(records.size() == 1, "only the valid records entry survives")
+	check(SaveSystem.save_game(loaded), "save_game rewrites the doc after unknown per-entry keys were dropped")
+	var reloaded := SaveSystem.load_game()
+	check(SaveSystem.validate(reloaded), "reloaded doc without unknown per-entry keys still validates")
+	var reloaded_records: Dictionary = reloaded["records"]
+	check(reloaded_records.has("harbor_sprint"), "sanitized entry survives load-save-load")
+	if reloaded_records.has("harbor_sprint"):
+		var reloaded_entry: Dictionary = reloaded_records["harbor_sprint"]
+		check(not reloaded_entry.has("note"), "unknown per-entry key stays dropped after load-save-load")
+		check(reloaded_entry.size() == 2, "re-saved entry still holds only the two known keys")
+		check(float(reloaded_entry.get("best_time_s", 0.0)) == 93.24, "re-saved entry keeps best_time_s")
+		check(int(reloaded_entry.get("best_position", 0)) == 1, "re-saved entry keeps best_position")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "records per-entry probe restores defaults")
 	return true
 
