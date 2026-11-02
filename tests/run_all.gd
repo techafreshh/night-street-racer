@@ -34,6 +34,8 @@ func _run_all() -> void:
 		"test_input_actions",
 		"test_gamestate_standalone",
 		"test_save_system_roundtrip",
+		"save_roundtrip_equal",
+		"corrupt_save_yields_defaults",
 		"test_gamestate_rejects_nonint_color",
 		"test_save_system_drops_unknown_settings_keys",
 		"test_save_system_rejects_unknown_settings_keys",
@@ -344,6 +346,51 @@ func test_save_system_roundtrip() -> bool:
 	check(str(fallback_progress.get("selected_car")) == "", "corrupt fallback resets selected_car")
 	check(str(fallback_progress.get("current_event")) == "", "corrupt fallback resets current_event")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "save restores defaults after the probe")
+	return true
+
+func save_roundtrip_equal() -> bool:
+	check(SaveSystem.SAVE_PATH == "user://save.json", "save path is user://save.json")
+	check(SaveSystem.SCHEMA_VERSION == 1, "save schema version is 1")
+	check(SaveSystem.SAVE_VERSION == 1, "save version is 1")
+	var data := SaveSystem.default_data()
+	var progress: Dictionary = data["progress"]
+	progress["selected_car"] = "hatch"
+	progress["current_event"] = "neon_loop"
+	(data["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": 93.24, "best_position": 1}
+	check(SaveSystem.save_game(data), "save_game writes a non-default doc")
+	var loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(loaded), "written save loads back valid")
+	var loaded_progress: Dictionary = loaded["progress"]
+	check(str(loaded_progress.get("selected_car")) == "hatch", "roundtrip keeps selected_car")
+	check(str(loaded_progress.get("current_event")) == "neon_loop", "roundtrip keeps current_event")
+	check(int(loaded.get("version")) == 1, "roundtrip keeps version")
+	var entry: Dictionary = (loaded["records"] as Dictionary).get("harbor_sprint", {})
+	check(float(entry.get("best_time_s", 0.0)) == 93.24, "roundtrip keeps best_time_s")
+	check(int(entry.get("best_position", 0)) == 1, "roundtrip keeps best_position")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "roundtrip probe restores defaults")
+	return true
+
+func corrupt_save_yields_defaults() -> bool:
+	if FileAccess.file_exists(SaveSystem.SAVE_PATH):
+		DirAccess.remove_absolute(SaveSystem.SAVE_PATH)
+	var missing := SaveSystem.load_game()
+	var defaults := SaveSystem.default_data()
+	check(SaveSystem.validate(missing), "missing file falls back to valid defaults")
+	check(SaveSystem.validate(defaults), "default_data passes validate")
+	check(int(missing.get("version")) == int(defaults.get("version")), "missing fallback keeps version")
+	check(str((missing["progress"] as Dictionary).get("selected_car")) == "", "missing fallback resets selected_car")
+	check(str((missing["progress"] as Dictionary).get("current_event")) == "", "missing fallback resets current_event")
+	var corrupt := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(corrupt != null, "save path opens for the corruption probe")
+	if corrupt != null:
+		corrupt.store_string("{not valid json!!!")
+		corrupt.close()
+	var fallback := SaveSystem.load_game()
+	check(SaveSystem.validate(fallback), "corrupt file falls back to valid defaults")
+	var fallback_progress: Dictionary = fallback["progress"]
+	check(str(fallback_progress.get("selected_car")) == "", "corrupt fallback resets selected_car")
+	check(str(fallback_progress.get("current_event")) == "", "corrupt fallback resets current_event")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "corrupt probe restores defaults")
 	return true
 
 func test_gamestate_rejects_nonint_color() -> bool:

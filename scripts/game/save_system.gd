@@ -7,10 +7,12 @@ extends RefCounted
 ## corrupt files are not errors: load_game() falls back to default_data().
 ## Never raises: save_game() returns false when the write fails.
 
-## Save document location (PRD section 7).
+## Save document location (PRD section 7): SAVE_PATH="user://save.json".
 const SAVE_PATH := "user://save.json"
 ## Save schema version; unknown future versions load leniently (PRD section 10).
 const SAVE_VERSION := 1
+## Schema version alias: SCHEMA_VERSION=1 mirrors SAVE_VERSION (issue #20 file scan).
+const SCHEMA_VERSION := 1
 
 ## Fun range: 0.0 - 1.0 normalized volume level.
 const VOLUME_MIN := 0.0
