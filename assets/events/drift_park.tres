@@ -1,0 +1,15 @@
+[gd_resource type="Resource" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/race/race_event.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+route_id = "drift_park"
+event_type = 0
+laps = 1
+opponents = 3
+unlock_req = &"alley_sprint"
+reward = 1000
+mode = &"race"
+checkpoints = PackedVector3Array(-102, 1, -102, -51, 1, -51, 0, 1, 0, 51, 1, 51, 102, 1, 102)
+checkpoint_radius = 10.0

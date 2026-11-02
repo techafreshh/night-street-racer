@@ -21,6 +21,8 @@ const VOLUME_MAX := 1.0
 const BEST_TIME_MIN := 0.0
 ## Fun range: best_position placement starts at 1 (the win).
 const BEST_POSITION_MIN := 1
+## Fun range: best_drift_score starts at 1 point (whole points only).
+const BEST_DRIFT_SCORE_MIN := 1
 
 
 ## PRD section 10-shaped defaults: version + settings + progress + records.
@@ -61,8 +63,9 @@ static func default_data() -> Dictionary:
 ## unknown settings keys are rejected (lenient dropping still lives in
 ## load_game(), not here). Records may
 ## be empty; each entry key must be a non-empty String holding a non-empty
-## Dictionary whose present best_time_s/best_position keys are numeric-positive
-## / int-or-whole-float-positive (whole float covers JSON round-trip coercion:
+## Dictionary whose present best_time_s/best_position/best_drift_score keys are
+## numeric-positive / int-or-whole-float-positive (whole float covers JSON
+## round-trip coercion:
 ## Godot parses every JSON number as float, so a saved best_position 1 loads
 ## back as 1.0 and strict `is int` would fail a valid round-trip; integrality
 ## is still enforced), with unknown per-entry keys ignored.
@@ -119,6 +122,14 @@ static func validate(data: Dictionary) -> bool:
 			if float(best_position) < float(BEST_POSITION_MIN):
 				return false
 			if floor(float(best_position)) != float(best_position):
+				return false
+		if (entry as Dictionary).has("best_drift_score"):
+			var best_drift: Variant = (entry as Dictionary)["best_drift_score"]
+			if not (best_drift is int or best_drift is float):
+				return false
+			if float(best_drift) < float(BEST_DRIFT_SCORE_MIN):
+				return false
+			if floor(float(best_drift)) != float(best_drift):
 				return false
 	var progress: Variant = data.get("progress")
 	if not (progress is Dictionary):
@@ -188,8 +199,9 @@ static func save_game(data: Dictionary) -> bool:
 ## document satisfies validate().
 ## Records merge per-entry onto the default empty table: each raw entry is
 ## checked against the validate() predicates and corrupt entries are
-## discarded while valid entries are sanitized to best_time_s/best_position
-## only; unknown per-entry keys are discarded and note-only entries are dropped.
+## discarded while valid entries are sanitized to
+## best_time_s/best_position/best_drift_score only; unknown per-entry keys
+## are discarded and note-only entries are dropped.
 ## A numeric future version carries through as int so validate() still
 ## detects the mismatch; a missing, non-numeric, equal, or older version
 ## normalizes to SAVE_VERSION.
@@ -251,11 +263,21 @@ static func load_game() -> Dictionary:
 					continue
 				if floor(float(best_position)) != float(best_position):
 					continue
+			if record.has("best_drift_score"):
+				var best_drift: Variant = record["best_drift_score"]
+				if not (best_drift is int or best_drift is float):
+					continue
+				if float(best_drift) < float(BEST_DRIFT_SCORE_MIN):
+					continue
+				if floor(float(best_drift)) != float(best_drift):
+					continue
 			var sanitized := {}
 			if record.has("best_time_s"):
 				sanitized["best_time_s"] = record["best_time_s"]
 			if record.has("best_position"):
 				sanitized["best_position"] = record["best_position"]
+			if record.has("best_drift_score"):
+				sanitized["best_drift_score"] = record["best_drift_score"]
 			if sanitized.is_empty():
 				continue
 			merged_records[key] = sanitized
