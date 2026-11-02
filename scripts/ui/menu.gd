@@ -89,14 +89,15 @@ func _on_race() -> void:
 
 
 func _on_garage() -> void:
-	var info := _info()
-	if info != null:
-		info.text = "Garage available in a later lap"
 	var gs = get_node_or_null("/root/GameState")
 	if gs != null:
 		if StringName(gs.get("selected_car")) == &"":
 			gs.select_car(String(gs.get("DEFAULT_CAR")))
 		print("CAR_SELECTED %s" % StringName(gs.get("selected_car")))
+	var tree := get_tree()
+	if tree == null:
+		return
+	tree.change_scene_to_file("res://scenes/ui/garage.tscn")
 
 
 func _on_settings() -> void:
