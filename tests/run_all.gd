@@ -229,12 +229,57 @@ func test_save_system_roundtrip() -> bool:
 	var missing_color := SaveSystem.default_data()
 	(missing_color["progress"] as Dictionary).erase("selected_color")
 	check(not SaveSystem.validate(missing_color), "missing selected_color fails SaveSystem.validate()")
+	var default_settings := SaveSystem.default_data()
+	check(SaveSystem.validate(default_settings), "default settings validate")
+	var bad_volume := SaveSystem.default_data()
+	(bad_volume["settings"] as Dictionary)["master_volume"] = "loud"
+	check(not SaveSystem.validate(bad_volume), "String master_volume fails SaveSystem.validate()")
+	var missing_volume := SaveSystem.default_data()
+	(missing_volume["settings"] as Dictionary).erase("sfx_volume")
+	check(not SaveSystem.validate(missing_volume), "missing sfx_volume fails SaveSystem.validate()")
+	var loud_volume := SaveSystem.default_data()
+	(loud_volume["settings"] as Dictionary)["master_volume"] = 2.0
+	check(not SaveSystem.validate(loud_volume), "out-of-range master_volume fails SaveSystem.validate()")
+	var int_volume := SaveSystem.default_data()
+	(int_volume["settings"] as Dictionary)["master_volume"] = 1
+	check(SaveSystem.validate(int_volume), "int master_volume validates as JSON round-trip equivalent")
+	var bad_assists := SaveSystem.default_data()
+	(bad_assists["settings"] as Dictionary)["assists"] = 1
+	check(not SaveSystem.validate(bad_assists), "non-bool assists fails SaveSystem.validate()")
+	var default_records := SaveSystem.default_data()
+	check(SaveSystem.validate(default_records), "default empty records validate")
+	var good_records := SaveSystem.default_data()
+	(good_records["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": 93.24, "best_position": 1}
+	check(SaveSystem.validate(good_records), "well-formed records entry validates")
+	var float_position := SaveSystem.default_data()
+	(float_position["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": 93.24, "best_position": 1.0}
+	check(SaveSystem.validate(float_position), "whole-float best_position validates as JSON round-trip equivalent")
+	var frac_position := SaveSystem.default_data()
+	(frac_position["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": 93.24, "best_position": 1.5}
+	check(not SaveSystem.validate(frac_position), "fractional best_position fails SaveSystem.validate()")
+	var string_entry := SaveSystem.default_data()
+	(string_entry["records"] as Dictionary)["harbor_sprint"] = "fast"
+	check(not SaveSystem.validate(string_entry), "String records entry fails SaveSystem.validate()")
+	var bad_time := SaveSystem.default_data()
+	(bad_time["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": "fast", "best_position": 1}
+	check(not SaveSystem.validate(bad_time), "String best_time_s fails SaveSystem.validate()")
+	var empty_entry := SaveSystem.default_data()
+	(empty_entry["records"] as Dictionary)["harbor_sprint"] = {}
+	check(not SaveSystem.validate(empty_entry), "empty records entry fails SaveSystem.validate()")
 	var color_trip := SaveSystem.default_data()
 	(color_trip["progress"] as Dictionary)["selected_color"] = 2
 	check(SaveSystem.save_game(color_trip), "save_game writes a non-default int selected_color")
 	var color_loaded := SaveSystem.load_game()
 	check(SaveSystem.validate(color_loaded), "non-default int selected_color loads back valid")
 	check(int((color_loaded["progress"] as Dictionary).get("selected_color")) == 2, "roundtrip keeps selected_color")
+	var records_trip := SaveSystem.default_data()
+	(records_trip["records"] as Dictionary)["harbor_sprint"] = {"best_time_s": 93.24, "best_position": 1}
+	check(SaveSystem.save_game(records_trip), "save_game writes well-formed records")
+	var records_loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(records_loaded), "well-formed records load back valid")
+	var loaded_entry: Dictionary = (records_loaded["records"] as Dictionary).get("harbor_sprint", {})
+	check(float(loaded_entry.get("best_time_s", 0.0)) == 93.24, "roundtrip keeps best_time_s")
+	check(int(loaded_entry.get("best_position", 0)) == 1, "roundtrip keeps best_position")
 	var data := SaveSystem.default_data()
 	var progress: Dictionary = data["progress"]
 	progress["selected_car"] = "hatch"
