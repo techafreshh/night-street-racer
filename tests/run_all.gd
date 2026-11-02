@@ -73,6 +73,8 @@ func _run_all() -> void:
 		"race_four_ai_finish",
 		"test_checkpoints_validate_in_order",
 		"test_wrong_way_detected",
+		"tunes_in_range",
+		"four_tunes_distinct",
 		"countdown_sequence_3s",
 		"lap_counting_increments",
 		"positions_sort_by_progress",
@@ -1616,6 +1618,82 @@ func test_wrong_way_detected() -> bool:
 	check(not RaceEvent.is_moving_wrong_way(Vector3.ZERO, car, nxt), "standing still is not wrong-way")
 	return true
 
+func tunes_in_range() -> bool:
+	var names: Array[String] = ["default_tune", "sport_tune", "drift_tune", "drag_tune"]
+	for n: String in names:
+		var tune := load("res://assets/cars/tunes/%s.tres" % n) as CarTune
+		check(tune != null, "%s loads as CarTune" % n)
+		if tune == null:
+			continue
+		check(CarTune.validate(tune), "%s passes CarTune.validate()" % n)
+		check(tune.engine_torque >= CarTune.ENGINE_TORQUE_MIN and tune.engine_torque <= CarTune.ENGINE_TORQUE_MAX, "%s torque in range (%.1f Nm)" % [n, tune.engine_torque])
+		check(tune.gear_ratios.size() >= CarTune.GEAR_COUNT_MIN and tune.gear_ratios.size() <= CarTune.GEAR_COUNT_MAX, "%s has 4-6 ratios (got %d)" % [n, tune.gear_ratios.size()])
+		for i in tune.gear_ratios.size():
+			var ratio: float = tune.gear_ratios[i]
+			check(ratio >= CarTune.GEAR_RATIO_MIN and ratio <= CarTune.GEAR_RATIO_MAX, "%s ratio %d in range (%.2f)" % [n, i, ratio])
+			if i > 0:
+				check(tune.gear_ratios[i - 1] > ratio, "%s ratios strictly decreasing at %d (%.2f > %.2f)" % [n, i, tune.gear_ratios[i - 1], ratio])
+		check(tune.final_drive >= CarTune.FINAL_DRIVE_MIN and tune.final_drive <= CarTune.FINAL_DRIVE_MAX, "%s final drive in range (%.2f)" % [n, tune.final_drive])
+		check(tune.tire_grip_front >= CarTune.TIRE_GRIP_MIN and tune.tire_grip_front <= CarTune.TIRE_GRIP_MAX, "%s front grip in range (%.2f)" % [n, tune.tire_grip_front])
+		check(tune.tire_grip_rear >= CarTune.TIRE_GRIP_MIN and tune.tire_grip_rear <= CarTune.TIRE_GRIP_MAX, "%s rear grip in range (%.2f)" % [n, tune.tire_grip_rear])
+		check(tune.roll_stiffness_front >= CarTune.ROLL_STIFFNESS_MIN and tune.roll_stiffness_front <= CarTune.ROLL_STIFFNESS_MAX, "%s front roll stiffness in range (%.0f)" % [n, tune.roll_stiffness_front])
+		check(tune.roll_stiffness_rear >= CarTune.ROLL_STIFFNESS_MIN and tune.roll_stiffness_rear <= CarTune.ROLL_STIFFNESS_MAX, "%s rear roll stiffness in range (%.0f)" % [n, tune.roll_stiffness_rear])
+		check(tune.downforce_coefficient >= CarTune.DOWNFORCE_MIN and tune.downforce_coefficient <= CarTune.DOWNFORCE_MAX, "%s downforce in range (%.2f)" % [n, tune.downforce_coefficient])
+		check(tune.drivetrain >= CarTune.DRIVETRAIN_MIN and tune.drivetrain <= CarTune.DRIVETRAIN_MAX, "%s drivetrain in range (got %d)" % [n, tune.drivetrain])
+	return true
+
+func four_tunes_distinct() -> bool:
+	var names: Array[String] = ["default_tune", "sport_tune", "drift_tune", "drag_tune"]
+	var times := {}
+	for n: String in names:
+		var tune := load("res://assets/cars/tunes/%s.tres" % n) as CarTune
+		check(tune != null, "%s loads as CarTune" % n)
+		if tune == null:
+			continue
+		var probe := VehicleController.new()
+		probe.mass = 1200.0
+		probe.tune = tune
+		probe.apply_tune()
+		times[n] = _simulate_zero_to_hundred(probe, tune)
+		probe.free()
+		check(float(times[n]) > 0.0 and float(times[n]) < 120.0, "%s reaches 100 km/h (%.2f s)" % [n, float(times[n])])
+	for i in names.size():
+		for j in range(i + 1, names.size()):
+			if not times.has(names[i]) or not times.has(names[j]):
+				continue
+			var a: float = times[names[i]]
+			var b: float = times[names[j]]
+			var denom := maxf(a, b)
+			check(denom > 0.0 and absf(a - b) / denom >= 0.03, "%s vs %s differ by >= 3%% (%.2f s vs %.2f s)" % [names[i], names[j], a, b])
+	return true
+
+func _simulate_zero_to_hundred(probe: VehicleController, tune: CarTune) -> float:
+	# Headless 0-100 km/h personality sim: full throttle at 60 Hz, upshifts at
+	# 5500 rpm, drive force from the tune's torque curve capped by
+	# driven-axle traction, minus the controller's drag and rolling terms.
+	var speed := 0.0
+	var time := 0.0
+	var gear := 1
+	var dt := 1.0 / 60.0
+	var count := probe.gear_ratios.size()
+	var mean_grip := (tune.tire_grip_front + tune.tire_grip_rear) * 0.5
+	var static_load := probe.mass * 9.81 / 4.0
+	var traction := float(probe._driven_wheel_count()) * mean_grip * static_load
+	while speed < 27.78 and time < 120.0:
+		var ratio: float = probe.gear_ratios[clampi(gear - 1, 0, count - 1)]
+		var rpm := clampf(maxf(800.0, absf(speed) / (TAU * probe.wheel_radius) * ratio * probe.final_drive * 60.0), 800.0, probe.max_engine_rpm)
+		if rpm >= 5500.0 and gear < count:
+			gear += 1
+			ratio = probe.gear_ratios[clampi(gear - 1, 0, count - 1)]
+			rpm = clampf(maxf(800.0, absf(speed) / (TAU * probe.wheel_radius) * ratio * probe.final_drive * 60.0), 800.0, probe.max_engine_rpm)
+		var force := probe._sample_torque(rpm) * ratio * probe.final_drive / probe.wheel_radius
+		force = minf(force, traction) - (probe.drag_linear * speed + probe.drag_quadratic * speed * speed)
+		if speed > 0.1:
+			force -= probe.rolling_resistance
+		speed += force / probe.mass * dt
+		time += dt
+	return time
+
 func countdown_sequence_3s() -> bool:
 	var ev := load("res://assets/events/harbor_sprint.tres") as RaceEvent
 	check(ev != null, "harbor_sprint loads for the countdown check")
@@ -1910,8 +1988,14 @@ func test_car_scenes_load() -> bool:
 	var modes := {
 		"coupe": VehicleController.DriveMode.RWD,
 		"hatch": VehicleController.DriveMode.RWD,
-		"sedan": VehicleController.DriveMode.RWD,
+		"sedan": VehicleController.DriveMode.FWD,
 		"awd": VehicleController.DriveMode.AWD,
+	}
+	var paints := {
+		"coupe": 0,
+		"hatch": 1,
+		"sedan": 2,
+		"awd": 3,
 	}
 	var wheels := {
 		"WheelFL": Vector3(-0.85, 0, -1.35),
@@ -1950,7 +2034,9 @@ func test_car_scenes_load() -> bool:
 		var paint := inst.get_node_or_null("CarPaint")
 		check(paint != null, "car_%s has a CarPaint child" % stem)
 		if paint != null:
-			check(paint.get("body_color") is Color, "car_%s CarPaint exposes a body_color" % stem)
+			check(paint.get("color_index") != null, "car_%s CarPaint exposes a color_index" % stem)
+			check(int(paint.get("color_index")) == int(paints[stem]), "car_%s color_index matches (got %d)" % [stem, int(paint.get("color_index"))])
+			check(CarPaint.COLORS.size() >= 3, "car_%s palette holds >= 3 variants (got %d)" % [stem, CarPaint.COLORS.size()])
 		check(inst.tune != null, "car_%s has a non-null tune" % stem)
 		if inst.tune != null:
 			check(CarTune.validate(inst.tune), "car_%s tune passes CarTune.validate()" % stem)
