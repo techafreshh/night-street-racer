@@ -1986,9 +1986,9 @@ func test_car_scenes_load() -> bool:
 		"awd": "res://assets/cars/tunes/drag_tune.tres",
 	}
 	var modes := {
-		"coupe": VehicleController.DriveMode.RWD,
+		"coupe": VehicleController.DriveMode.FWD,
 		"hatch": VehicleController.DriveMode.RWD,
-		"sedan": VehicleController.DriveMode.FWD,
+		"sedan": VehicleController.DriveMode.RWD,
 		"awd": VehicleController.DriveMode.AWD,
 	}
 	var paints := {

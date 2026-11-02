@@ -12,4 +12,4 @@ tire_grip_rear = 1.0
 roll_stiffness_front = 8000.0
 roll_stiffness_rear = 6500.0
 downforce_coefficient = 1.2
-drivetrain = 0
+drivetrain = 1
