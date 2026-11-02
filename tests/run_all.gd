@@ -55,6 +55,8 @@ func _run_all() -> void:
 		"test_garage_writes_via_typed_api",
 		"test_garage_scene_loads",
 		"test_garage_car_grid",
+		"test_garage_grid_async_defers_work",
+		"test_garage_grid_async_completes",
 		"test_garage_unlock_corrupt",
 		"test_garage_color_persists",
 		"test_event_select_grid",
@@ -1160,6 +1162,117 @@ func test_garage_car_grid() -> bool:
 		gs.free()
 		await process_frame
 	return true
+
+func test_garage_grid_async_defers_work() -> bool:
+	var packed = load("res://scenes/ui/garage.tscn")
+	check(packed is PackedScene, "garage.tscn loads as PackedScene for the deferral probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "garage instantiates for the deferral probe")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	# _ready prints its token and returns synchronously; the grid build is
+	# fire-and-forget, so the CarGrid must still be empty on this frame.
+	var grid := instance.find_child("CarGrid", true, false) as GridContainer
+	check(grid != null, "deferral probe has a CarGrid")
+	if grid != null:
+		check(grid.get_child_count() == 0, "grid is empty on the _ready frame (got %d)" % grid.get_child_count())
+	var src := FileAccess.get_file_as_string("res://scripts/ui/garage.gd")
+	check(src.contains("load_threaded_request"), "garage.gd issues threaded loads off _ready")
+	check(src.contains("GARAGE_GRID_READY"), "garage.gd prints GARAGE_GRID_READY when the async grid completes")
+	check(src.contains("load_threaded_get_status"), "garage.gd polls threaded load status")
+	check(src.contains("_build_car_grid_async"), "garage.gd builds the grid via _build_car_grid_async")
+	await process_frame
+	await process_frame
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	return true
+
+
+func test_garage_grid_async_completes() -> bool:
+	check(SaveSystem.save_game(SaveSystem.default_data()), "garage async completion probe starts from defaults")
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for garage async completion")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable for garage async completion")
+	if gs == null:
+		return true
+	gs.set("selected_car", &"")
+	gs.set("selected_color", 0)
+	var packed = load("res://scenes/ui/garage.tscn")
+	check(packed is PackedScene, "garage.tscn loads as PackedScene for the completion probe")
+	if not (packed is PackedScene):
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	await process_frame
+	var grid := instance.find_child("CarGrid", true, false) as GridContainer
+	check(grid != null, "completion probe has a CarGrid")
+	if grid == null:
+		root.remove_child(instance)
+		instance.free()
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	check(grid.get_child_count() == 4, "async grid holds 4 car buttons (got %d)" % grid.get_child_count())
+	var stems: Array[String] = ["sedan", "coupe", "hatch", "awd"]
+	var names := {"sedan": "Sedan", "coupe": "Coupe", "hatch": "Hatch", "awd": "AWD"}
+	for stem in stems:
+		var btn := instance.find_child("Car_" + stem, true, false) as Button
+		check(btn != null, "async grid has a button for %s" % stem)
+		if btn == null:
+			continue
+		check(btn.custom_minimum_size == Vector2(320, 48), "%s keeps the 320x48 contract" % stem)
+		check(btn.text.contains(str(names[stem])), "async button text names %s" % stem)
+		var should_lock := stem != "sedan"
+		check(btn.disabled == should_lock, "%s disabled matches lock state" % stem)
+		if should_lock:
+			check(btn.text.contains("Locked"), "%s locked text carries the lock suffix" % stem)
+			check(btn.focus_mode == Control.FOCUS_NONE, "%s locked button skips focus" % stem)
+		else:
+			check(not btn.text.contains("Locked"), "%s unlocked text has no lock suffix" % stem)
+			check(btn.focus_mode != Control.FOCUS_NONE, "%s unlocked button stays focusable" % stem)
+	var info := instance.find_child("CarInfo", true, false) as Label
+	check(info != null and info.text.contains("Sedan"), "CarInfo names the picked car")
+	if info != null:
+		check(info.text.contains("Nm"), "CarInfo shows the live torque stat")
+	var focused := root.gui_get_focus_owner()
+	var back := instance.find_child("BackButton", true, false) as BaseButton
+	check(focused != null, "async build leaves focus on an unlocked button or BackButton")
+	if focused != null:
+		var focused_name := str((focused as Node).name)
+		check(focused_name == "BackButton" or focused_name.begins_with("Car_"), "focus sits on %s" % focused_name)
+		if focused_name.begins_with("Car_"):
+			check(not (focused as BaseButton).disabled, "focus sits on an unlocked car (%s)" % focused_name)
+	if back != null and focused == null:
+		check(false, "focus owner is null despite BackButton existing")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	check(SaveSystem.save_game(SaveSystem.default_data()), "garage async completion probe restores defaults")
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
+	return true
+
 
 func test_garage_unlock_corrupt() -> bool:
 	check(SaveSystem.save_game(SaveSystem.default_data()), "corrupt unlock probe starts from defaults")
