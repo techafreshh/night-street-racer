@@ -52,8 +52,8 @@ static func is_car_unlocked(car_id: String) -> bool:
 		return true
 	var data := SaveSystem.load_game()
 	var progress: Dictionary = data.get("progress", {})
-	var unlocked: Array = progress.get("unlocked_cars", [])
-	return unlocked.has(car_id) or unlocked.has(StringName(car_id))
+	var unlocked := Progression._string_list(progress.get("unlocked_cars", []))
+	return unlocked.has(car_id)
 
 
 ## Drive-mode suffix for the stat line (0 FWD, 1 RWD, 2 AWD).
