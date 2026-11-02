@@ -26,26 +26,58 @@ func _ready() -> void:
 	_apply()
 
 
+## Re-apply the tint when the car subtree (re-)enters the tree so a
+## removed-then-re-added car keeps its paint. Idempotent with _ready.
+func _enter_tree() -> void:
+	_apply()
+
+
+## Clear every surface-override slot written by _apply while the sibling
+## MeshInstance3Ds are still valid. A freed car subtree with live override
+## slots trips upstream godotengine/godot#85817
+## (MeshInstance3D teardown logs: Parameter "material" is null).
+## Exit-tree propagation for a freed subtree completes before any member
+## destructor runs, which is exactly the precondition the workaround needs.
+func _exit_tree() -> void:
+	_clear_overrides()
+
+
+func _target_meshes() -> Array[MeshInstance3D]:
+	var targets: Array[MeshInstance3D] = []
+	var car := get_parent()
+	if car == null:
+		return targets
+	var slab := car.get_node_or_null("BodyMesh") as MeshInstance3D
+	if slab != null and slab.mesh != null:
+		targets.append(slab)
+		return targets
+	var body := car.get_node_or_null("Body")
+	if body == null:
+		return targets
+	for mi in body.find_children("*", "MeshInstance3D", true, false):
+		var mesh_inst := mi as MeshInstance3D
+		if mesh_inst == null or mesh_inst.mesh == null:
+			continue
+		if str(mesh_inst.name).contains("Wheel"):
+			continue
+		targets.append(mesh_inst)
+	return targets
+
+
+func _clear_overrides() -> void:
+	for mesh_inst in _target_meshes():
+		if not is_instance_valid(mesh_inst) or mesh_inst.mesh == null:
+			continue
+		for i in mesh_inst.mesh.get_surface_count():
+			mesh_inst.set_surface_override_material(i, null)
+
+
 func _apply() -> void:
 	var car := get_parent()
 	if car == null or COLORS.is_empty():
 		return
 	var tint: Color = COLORS[posmod(color_index, COLORS.size())]
-	var targets: Array[MeshInstance3D] = []
-	var slab := car.get_node_or_null("BodyMesh") as MeshInstance3D
-	if slab != null and slab.mesh != null:
-		targets.append(slab)
-	else:
-		var body := car.get_node_or_null("Body")
-		if body == null:
-			return
-		for mi in body.find_children("*", "MeshInstance3D", true, false):
-			var mesh_inst := mi as MeshInstance3D
-			if mesh_inst == null or mesh_inst.mesh == null:
-				continue
-			if str(mesh_inst.name).contains("Wheel"):
-				continue
-			targets.append(mesh_inst)
+	var targets: Array[MeshInstance3D] = _target_meshes()
 	for mesh_inst in targets:
 		for i in mesh_inst.mesh.get_surface_count():
 			var src := mesh_inst.mesh.surface_get_material(i) as StandardMaterial3D
