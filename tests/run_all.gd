@@ -34,6 +34,7 @@ func _run_all() -> void:
 		"test_input_actions",
 		"test_gamestate_standalone",
 		"test_save_system_roundtrip",
+		"test_save_system_partial_settings_merge",
 		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
 		"test_gamestate_selected_car_default",
@@ -303,6 +304,29 @@ func test_save_system_roundtrip() -> bool:
 	check(str(fallback_progress.get("selected_car")) == "", "corrupt fallback resets selected_car")
 	check(str(fallback_progress.get("current_event")) == "", "corrupt fallback resets current_event")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "save restores defaults after the probe")
+	return true
+
+func test_save_system_partial_settings_merge() -> bool:
+	var defaults := SaveSystem.default_data()
+	var default_settings: Dictionary = defaults["settings"]
+	var raw := {
+		"version": SaveSystem.SAVE_VERSION,
+		"settings": {"master_volume": 0.3},
+		"progress": (defaults["progress"] as Dictionary).duplicate(true),
+		"records": {},
+	}
+	var probe := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(probe != null, "save path opens for the partial settings probe")
+	if probe != null:
+		probe.store_string(JSON.stringify(raw))
+		probe.close()
+	var loaded := SaveSystem.load_game()
+	check(SaveSystem.validate(loaded), "partial settings load back valid")
+	var loaded_settings: Dictionary = loaded["settings"]
+	check(absf(float(loaded_settings.get("master_volume", -1.0)) - 0.3) < 0.001, "partial merge keeps the saved master_volume")
+	for key: String in ["music_volume", "sfx_volume", "assists", "camera_shake"]:
+		check(loaded_settings.get(key) == default_settings.get(key), "partial merge fills default %s" % key)
+	check(SaveSystem.save_game(SaveSystem.default_data()), "partial settings probe restores defaults")
 	return true
 
 func test_save_system_rejects_nonstring_selection() -> bool:

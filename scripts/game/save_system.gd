@@ -148,7 +148,10 @@ static func load_game() -> Dictionary:
 	var merged := default_data()
 	var raw: Dictionary = parsed
 	if raw.get("settings") is Dictionary:
-		merged["settings"] = raw["settings"]
+		var merged_settings: Dictionary = merged["settings"]
+		var saved_settings: Dictionary = raw["settings"]
+		for key: Variant in saved_settings.keys():
+			merged_settings[key] = saved_settings[key]
 	if raw.get("progress") is Dictionary:
 		var progress: Dictionary = merged["progress"]
 		var saved_progress: Dictionary = raw["progress"]
