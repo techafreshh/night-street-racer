@@ -142,6 +142,27 @@ static func validate(data: Dictionary) -> bool:
 	return true
 
 
+## Read-boundary unlock-list sanitizer (mirrors Progression._string_list
+## without the cross-class dependency): non-Array yields the empty default,
+## otherwise keep non-empty Strings, fold non-empty StringNames to String,
+## and drop everything else in order without deduping.
+static func _sanitized_unlock_list(v: Variant) -> Array:
+	var out: Array = []
+	if not (v is Array):
+		return out
+	for item: Variant in (v as Array):
+		if item is String:
+			if (item as String).is_empty():
+				continue
+			out.append(item)
+		elif item is StringName:
+			var folded := String(item)
+			if folded.is_empty():
+				continue
+			out.append(folded)
+	return out
+
+
 ## Write the save document. Returns false (never raises) when the file
 ## cannot be opened. StringName values serialize as JSON strings.
 static func save_game(data: Dictionary) -> bool:
@@ -162,6 +183,9 @@ static func save_game(data: Dictionary) -> bool:
 ## to the default_data() progress keys; unknown progress keys are discarded.
 ## Unknown top-level keys are discarded on load and never re-saved (known
 ## keys still merge leniently over defaults; version stamp behavior unchanged).
+## The unlock lists progress.unlocked_events/progress.unlocked_cars are
+## sanitized to non-empty Strings (non-Arrays reset to empty) so the loaded
+## document satisfies validate().
 ## Records merge per-entry onto the default empty table: each raw entry is
 ## checked against the validate() predicates and corrupt entries are
 ## discarded while valid entries are sanitized to best_time_s/best_position
@@ -195,7 +219,10 @@ static func load_game() -> Dictionary:
 		var saved_progress: Dictionary = raw["progress"]
 		for key: Variant in saved_progress.keys():
 			if progress.has(key):
-				progress[key] = saved_progress[key]
+				if key == "unlocked_events" or key == "unlocked_cars":
+					progress[key] = _sanitized_unlock_list(saved_progress[key])
+				else:
+					progress[key] = saved_progress[key]
 	if raw.get("records") is Dictionary:
 		var merged_records: Dictionary = merged["records"]
 		var saved_records: Dictionary = raw["records"]
