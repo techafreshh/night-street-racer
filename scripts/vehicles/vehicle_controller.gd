@@ -80,6 +80,9 @@ var engine_rpm := 800.0
 ## True while engine_rpm >= redline_rpm; hook for future audio/fuel limits.
 var fuel_cut := false
 var is_grounded := false
+## Max per-wheel slip angle magnitude (radians) this tick; the audio
+## mixer fades the skid loop in above 0.20 rad, handbrake slides count.
+var slip_intensity := 0.0
 
 var _throttle := 0.0
 var _brake := 0.0
@@ -107,6 +110,7 @@ var _wheels: Array[Dictionary] = []
 
 func _ready() -> void:
 	apply_tune()
+	_register_audio()
 	var repaired := resolve_limiter_order(shift_up_rpm, redline_rpm, max_engine_rpm)
 	shift_up_rpm = repaired[0]
 	redline_rpm = repaired[1]
@@ -142,6 +146,25 @@ func apply_tune() -> void:
 	roll_stiffness_rear = tune.roll_stiffness_rear
 	downforce_coefficient = tune.downforce_coefficient
 	drive_mode = clampi(tune.drivetrain, 0, 2) as DriveMode
+
+
+func _exit_tree() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("unregister_vehicle"):
+		am.call("unregister_vehicle", self)
+
+
+## Guarded audio hookup: player-driven cars follow the mixer singleton
+## (mirroring assists.gd's guarded /root/Settings poll); AI cars stay
+## silent so the mixer always tracks the player car.
+func _register_audio() -> void:
+	if not use_player_input:
+		return
+	if not is_inside_tree():
+		return
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("register_vehicle"):
+		am.call("register_vehicle", self)
 
 
 func reset_vehicle() -> void:
@@ -382,6 +405,7 @@ func _physics_process(delta: float) -> void:
 	var driven_count := _driven_wheel_count()
 
 	var grounded := 0
+	var max_slip := 0.0
 	for w in _wheels:
 		var ray: RayCast3D = w["node"]
 		ray.force_raycast_update()
@@ -417,6 +441,7 @@ func _physics_process(delta: float) -> void:
 		var f_speed := vel.dot(w_fwd)
 		var l_speed := vel.dot(w_right)
 		var slip := atan2(l_speed, absf(f_speed) + 1.0)
+		max_slip = maxf(max_slip, absf(slip))
 		var ramp := clampf(absf(f_speed) / 2.0, 0.0, 1.0)
 
 		# Longitudinal: drive split per drive_mode, service brake on all
@@ -452,6 +477,11 @@ func _physics_process(delta: float) -> void:
 		apply_central_force(-up * downforce_coefficient * planar_speed * planar_speed)
 
 	is_grounded = grounded > 0
+	# Skid readout: loudest per-wheel slip this tick; a handbrake slide
+	# at speed counts even when the kinematic slip reads small.
+	slip_intensity = max_slip
+	if _handbrake and planar_speed > 3.0:
+		slip_intensity = maxf(slip_intensity, 0.3)
 
 	# Central drag plus rolling resistance.
 	var horizontal := Vector3(linear_velocity.x, 0.0, linear_velocity.z)

@@ -29,6 +29,7 @@ static func is_unlocked(ev: RaceEvent) -> bool:
 
 func _ready() -> void:
 	print("MENU_READY")
+	_start_menu_music()
 	if menu_mode == 1:
 		print("EVENT_SELECT_READY")
 		_build_event_grid_async()
@@ -88,6 +89,7 @@ func _wire_event_select() -> void:
 
 
 func _on_race() -> void:
+	_play_click()
 	var tree := get_tree()
 	if tree == null:
 		return
@@ -95,6 +97,7 @@ func _on_race() -> void:
 
 
 func _on_garage() -> void:
+	_play_click()
 	var gs = get_node_or_null("/root/GameState")
 	if gs != null:
 		var selected := &""
@@ -117,6 +120,7 @@ func _on_garage() -> void:
 
 
 func _on_settings() -> void:
+	_play_click()
 	var tree := get_tree()
 	if tree == null:
 		return
@@ -128,6 +132,20 @@ func _on_quit() -> void:
 	if tree == null:
 		return
 	tree.quit()
+
+
+## Guarded UI click plus menu-music (re)start: no-ops headless or when
+## the mixer singleton is absent, mirroring the _resolve guards above.
+func _play_click() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("play_click"):
+		am.call("play_click")
+
+
+func _start_menu_music() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("start_menu_music"):
+		am.call("start_menu_music")
 
 
 func _on_back() -> void:
@@ -219,6 +237,7 @@ func _add_event_button(grid: GridContainer, ev: RaceEvent, unlocked: bool, best:
 
 
 func _on_event_chosen(route_id: String) -> void:
+	_play_click()
 	var path := "res://assets/events/%s.tres" % route_id
 	var chosen := load(path) as RaceEvent if ResourceLoader.exists(path) else null
 	if chosen == null or not Progression.is_event_unlocked(chosen):

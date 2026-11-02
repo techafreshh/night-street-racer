@@ -81,11 +81,13 @@ func _resume() -> void:
 
 
 func _on_resume() -> void:
+	_play_click()
 	if _paused:
 		_resume()
 
 
 func _on_restart() -> void:
+	_play_click()
 	var parent := get_parent()
 	if parent != null and parent.has_method("restart_race"):
 		parent.call("restart_race")
@@ -98,6 +100,7 @@ func _on_restart() -> void:
 
 
 func _on_quit() -> void:
+	_play_click()
 	_paused = false
 	var tree := get_tree()
 	if tree != null:
@@ -106,6 +109,13 @@ func _on_quit() -> void:
 	if tree == null:
 		return
 	tree.change_scene_to_file("res://scenes/ui/main_menu.tscn")
+
+
+## Guarded UI click: no-op headless or when the mixer is absent.
+func _play_click() -> void:
+	var am := get_node_or_null("/root/AudioManager")
+	if am != null and am.has_method("play_click"):
+		am.call("play_click")
 
 
 func _btn(button_name: String) -> BaseButton:
