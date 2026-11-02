@@ -10,5 +10,6 @@ laps = 2
 opponents = 4
 unlock_req = &"downtown_gp"
 reward = 1200
+mode = &"race"
 checkpoints = PackedVector3Array(-136, 1, -136, 0, 1, -136, 136, 1, -136, 136, 1, 0, 136, 1, 136, 0, 1, 136, -136, 1, 136, -136, 1, 0)
 checkpoint_radius = 10.0

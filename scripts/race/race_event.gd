@@ -24,6 +24,8 @@ const OPPONENTS_MIN := 0
 const OPPONENTS_MAX := 7
 const REWARD_MIN := 0
 const REWARD_MAX := 5000
+const MODE_RACE := &"race"
+const MODE_TIME_TRIAL := &"time_trial"
 
 ## Unique event handle; matches the asset filename stem (e.g. harbor_sprint).
 @export var route_id := ""
@@ -37,6 +39,8 @@ const REWARD_MAX := 5000
 @export var unlock_req: StringName = &""
 ## Fun range: 0 - 5000 credit payout.
 @export var reward := 500
+## Run mode: &"race" (rivals) or &"time_trial" (solo, no rivals).
+@export var mode: StringName = MODE_RACE
 ## Directed checkpoint list: gate positions on the road grid at y ~ 1.
 @export var checkpoints: PackedVector3Array = PackedVector3Array()
 ## Fun range: 6.0 - 14.0 m gate trigger radius.
@@ -57,6 +61,8 @@ static func validate(event: RaceEvent) -> bool:
 		return false
 	if event.reward < REWARD_MIN or event.reward > REWARD_MAX:
 		return false
+	if event.mode != MODE_RACE and event.mode != MODE_TIME_TRIAL:
+		return false
 	if event.checkpoints.size() < CHECKPOINT_COUNT_MIN:
 		return false
 	if event.checkpoint_radius < CHECKPOINT_RADIUS_MIN or event.checkpoint_radius > CHECKPOINT_RADIUS_MAX:
@@ -75,6 +81,11 @@ static func is_circuit(event: RaceEvent) -> bool:
 
 static func is_sprint(event: RaceEvent) -> bool:
 	return event != null and event.event_type == EventType.SPRINT
+
+
+## True when the event is flagged as a solo time-trial run.
+static func is_time_trial(event: RaceEvent) -> bool:
+	return event != null and event.mode == MODE_TIME_TRIAL
 
 
 ## Expected next gate after `last_index` (-1 is the race-start sentinel):

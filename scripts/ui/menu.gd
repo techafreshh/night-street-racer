@@ -188,6 +188,9 @@ func _add_event_button(grid: GridContainer, ev: RaceEvent) -> void:
 	btn.custom_minimum_size = Vector2(320, 48)
 	var unlocked := MenuUI.is_unlocked(ev)
 	btn.text = "%s (%d laps, %d rivals)" % [ev.route_id, ev.laps, ev.opponents]
+	var best := TimeTrial.get_best(ev.route_id)
+	if best > 0.0:
+		btn.text += "  BEST %s" % TimeTrial.format_time(best)
 	if unlocked:
 		btn.pressed.connect(_on_event_chosen.bind(ev.route_id))
 	else:

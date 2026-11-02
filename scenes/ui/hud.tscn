@@ -44,6 +44,18 @@ theme_override_font_sizes/font_size = 30
 text = "00:00.000"
 horizontal_alignment = 1
 
+[node name="DeltaLabel" type="Label" parent="."]
+visible = false
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -150.0
+offset_top = 56.0
+offset_right = 150.0
+offset_bottom = 84.0
+theme_override_font_sizes/font_size = 22
+text = "--:--.---"
+horizontal_alignment = 1
+
 [node name="DriftPopup" type="Label" parent="."]
 visible = false
 anchor_left = 0.5
