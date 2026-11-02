@@ -121,6 +121,10 @@ func _run_all() -> void:
 		"test_save_system_sanitizes_unlock_lists",
 		"top3_unlocks_next_event",
 		"win_unlocks_car",
+		"test_pause_menu_scene",
+		"test_pause_toggle_freezes_tree",
+		"test_race_scene_boots",
+		"test_event_to_garage_flow",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -3914,4 +3918,162 @@ func hud_subscribes_to_race_signals() -> bool:
 		check(not src.contains(banned), "hud script carries no %s" % banned)
 	root.remove_child(instance)
 	instance.free()
+	return true
+
+func test_pause_menu_scene() -> bool:
+	var packed = load("res://scenes/ui/pause_menu.tscn")
+	check(packed is PackedScene, "pause_menu.tscn loads as PackedScene")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "pause menu instantiates")
+	if instance == null:
+		return true
+	check(instance.name == "PauseMenu", "root node is PauseMenu")
+	check(instance.get_script() != null, "pause root carries the Pause script")
+	check(instance.process_mode == Node.PROCESS_MODE_ALWAYS, "pause root runs with PROCESS_MODE_ALWAYS")
+	check((instance as CanvasLayer).visible == false, "pause menu starts hidden")
+	for bname in ["ResumeButton", "RestartButton", "QuitButton"]:
+		var btn := instance.find_child(bname, true, false) as BaseButton
+		check(btn != null, "pause menu has %s" % bname)
+		if btn != null:
+			check(btn.custom_minimum_size == Vector2(320, 48), "%s keeps the 320x48 contract" % bname)
+	var src := FileAccess.get_file_as_string("res://scripts/ui/pause.gd")
+	check(src.contains("PAUSED"), "pause script prints PAUSED")
+	check(src.contains("RESUMED"), "pause script prints RESUMED")
+	check(src.contains("get_tree().paused"), "pause script toggles get_tree().paused")
+	check(src.contains("restart_race"), "pause script restarts through restart_race")
+	check(src.contains("main_menu.tscn"), "pause script quits to the main menu")
+	for banned in ["_physics_process", "apply_force", "apply_central_force", "linear_velocity", "angular_velocity", "RayCast", "PhysicsDirectBodyState3D"]:
+		check(not src.contains(banned), "pause script carries no %s" % banned)
+	instance.free()
+	return true
+
+func test_pause_toggle_freezes_tree() -> bool:
+	var packed = load("res://scenes/ui/pause_menu.tscn")
+	check(packed is PackedScene, "pause_menu.tscn loads as PackedScene for the toggle probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "pause menu instantiates for the toggle probe")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var tree := instance.get_tree()
+	check(tree != null, "pause menu is in the tree for the toggle probe")
+	if tree == null:
+		root.remove_child(instance)
+		instance.free()
+		return true
+	check(tree.paused == false, "tree starts unpaused")
+	check((instance as CanvasLayer).visible == false, "pause menu starts hidden in the tree")
+	var first := InputEventAction.new()
+	first.action = &"pause"
+	first.pressed = true
+	instance.call("_unhandled_input", first)
+	check(tree.paused == true, "first pause press pauses the tree")
+	check((instance as CanvasLayer).visible == true, "pause menu shows while paused")
+	var second := InputEventAction.new()
+	second.action = &"pause"
+	second.pressed = true
+	instance.call("_unhandled_input", second)
+	check(tree.paused == false, "second pause press resumes the tree")
+	check((instance as CanvasLayer).visible == false, "pause menu hides on resume")
+	tree.paused = false
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	return true
+
+func test_race_scene_boots() -> bool:
+	var stems: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]
+	for stem in stems:
+		var packed = load("res://scenes/races/race_%s.tscn" % stem)
+		check(packed is PackedScene, "race_%s.tscn loads as PackedScene" % stem)
+		if not (packed is PackedScene):
+			continue
+		var instance: Node = packed.instantiate()
+		check(instance != null, "race_%s instantiates" % stem)
+		if instance == null:
+			continue
+		root.add_child(instance)
+		await process_frame
+		await process_frame
+		var manager := instance.get_node_or_null("EventManager")
+		check(manager != null, "race_%s has an EventManager" % stem)
+		if manager != null:
+			check(int(manager.get("state")) == 0, "race_%s manager starts in COUNTDOWN" % stem)
+		check(instance.get_node_or_null("Route") != null, "race_%s has a Route" % stem)
+		check(instance.get_node_or_null("HUD") != null, "race_%s has a HUD" % stem)
+		check(instance.get_node_or_null("PauseMenu") != null, "race_%s has a PauseMenu" % stem)
+		check(instance.has_method("restart_race"), "race_%s exposes restart_race" % stem)
+		for _i in 60:
+			await process_frame
+		root.remove_child(instance)
+		instance.free()
+		await process_frame
+		await physics_frame
+	var src := FileAccess.get_file_as_string("res://scripts/race/race.gd")
+	check(src.contains("RACE_READY"), "race script prints RACE_READY")
+	check(src.contains("restart_race"), "race script exposes restart_race")
+	check(src.contains("set_last_result"), "race script hands the result to GameState")
+	check(src.contains("results.tscn"), "race script finishes into results.tscn")
+	return true
+
+func test_event_to_garage_flow() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	check(packed is PackedScene, "event_select.tscn loads as PackedScene for the flow probe")
+	if not (packed is PackedScene):
+		return true
+	var gs: Node = root.get_node_or_null("GameState")
+	check(gs != null, "GameState singleton is reachable for the flow probe")
+	if gs == null:
+		return true
+	var resolved := &""
+	for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]:
+		var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
+		if ev != null and MenuUI.is_unlocked(ev):
+			resolved = StringName(stem)
+			break
+	check(resolved != &"", "at least one event is unlocked for the flow probe")
+	if resolved == &"":
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "event select instantiates for the flow probe")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var btn := instance.find_child("Event_" + String(resolved), true, false) as BaseButton
+	check(btn != null, "flow probe has Event_%s button" % String(resolved))
+	if btn == null:
+		root.remove_child(instance)
+		instance.free()
+		return true
+	var prev := StringName(gs.get("current_event"))
+	btn.pressed.emit()
+	await process_frame
+	await process_frame
+	check(StringName(gs.get("current_event")) == resolved, "event press writes current_event")
+	var swapped := current_scene
+	check(swapped != null and swapped != instance, "event press leaves EventSelect")
+	check(swapped != null and (swapped.name == "Garage" or swapped.find_child("CarGrid", true, false) != null), "event press navigates to the garage scene")
+	var garage_grid := swapped.find_child("CarGrid", true, false) as GridContainer if swapped != null else null
+	for _i in 40:
+		if garage_grid != null and is_instance_valid(garage_grid) and garage_grid.get_child_count() >= 4:
+			break
+		await process_frame
+	if swapped != null and swapped != instance and is_instance_valid(swapped):
+		if swapped.get_parent() == root:
+			root.remove_child(swapped)
+		swapped.free()
+		await process_frame
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	gs.set("current_event", prev)
+	await process_frame
 	return true
