@@ -38,6 +38,7 @@ func _run_all() -> void:
 		"test_save_system_partial_settings_merge",
 		"test_save_system_rejects_nonstring_selection",
 		"test_gamestate_persists_selection",
+		"test_gamestate_reload_rejects_non_numeric_color",
 		"test_gamestate_selected_car_default",
 		"test_main_menu_scene",
 		"test_menu_buttons",
@@ -456,6 +457,70 @@ func test_gamestate_persists_selection() -> bool:
 	first.free()
 	second.free()
 	check(SaveSystem.save_game(SaveSystem.default_data()), "persistence probe restores defaults")
+	return true
+
+func test_gamestate_reload_rejects_non_numeric_color() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the non-numeric color probe")
+	if script == null:
+		return true
+	var bad_word := SaveSystem.default_data()
+	(bad_word["progress"] as Dictionary)["selected_color"] = "red"
+	check(SaveSystem.save_game(bad_word), "save_game writes String selected_color probe")
+	var probe_word = script.new()
+	probe_word.reload_from_disk()
+	check(int(probe_word.get("selected_color")) == 0, "String selected_color reloads as default 0")
+	probe_word.free()
+	var bad_numeric := SaveSystem.default_data()
+	(bad_numeric["progress"] as Dictionary)["selected_color"] = "2"
+	check(SaveSystem.save_game(bad_numeric), "save_game writes numeric String selected_color probe")
+	var probe_numeric = script.new()
+	probe_numeric.reload_from_disk()
+	check(int(probe_numeric.get("selected_color")) == 0, "numeric String selected_color reloads as default 0")
+	probe_numeric.free()
+	var bad_bool := SaveSystem.default_data()
+	(bad_bool["progress"] as Dictionary)["selected_color"] = true
+	check(SaveSystem.save_game(bad_bool), "save_game writes bool selected_color probe")
+	var probe_bool = script.new()
+	probe_bool.reload_from_disk()
+	check(int(probe_bool.get("selected_color")) == 0, "bool selected_color reloads as default 0")
+	probe_bool.free()
+	var bad_null := SaveSystem.default_data()
+	(bad_null["progress"] as Dictionary)["selected_color"] = null
+	check(SaveSystem.save_game(bad_null), "save_game writes null selected_color probe")
+	var probe_null = script.new()
+	probe_null.reload_from_disk()
+	check(int(probe_null.get("selected_color")) == 0, "null selected_color reloads as default 0")
+	probe_null.free()
+	var missing := SaveSystem.default_data()
+	(missing["progress"] as Dictionary).erase("selected_color")
+	check(SaveSystem.save_game(missing), "save_game writes missing selected_color probe")
+	var probe_missing = script.new()
+	probe_missing.reload_from_disk()
+	check(int(probe_missing.get("selected_color")) == 0, "missing selected_color reloads as default 0")
+	probe_missing.free()
+	var bad_dict := SaveSystem.default_data()
+	(bad_dict["progress"] as Dictionary)["selected_color"] = {}
+	check(SaveSystem.save_game(bad_dict), "save_game writes Dictionary selected_color probe")
+	var probe_dict = script.new()
+	probe_dict.reload_from_disk()
+	check(int(probe_dict.get("selected_color")) == 0, "Dictionary selected_color reloads as default 0")
+	probe_dict.free()
+	var good_int := SaveSystem.default_data()
+	(good_int["progress"] as Dictionary)["selected_color"] = 2
+	check(SaveSystem.save_game(good_int), "save_game writes int selected_color probe")
+	var probe_int = script.new()
+	probe_int.reload_from_disk()
+	check(int(probe_int.get("selected_color")) == 2, "int selected_color reloads as 2")
+	probe_int.free()
+	var good_float := SaveSystem.default_data()
+	(good_float["progress"] as Dictionary)["selected_color"] = 2.0
+	check(SaveSystem.save_game(good_float), "save_game writes float selected_color probe")
+	var probe_float = script.new()
+	probe_float.reload_from_disk()
+	check(int(probe_float.get("selected_color")) == 2, "float selected_color reloads as 2")
+	probe_float.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "non-numeric color probe restores defaults")
 	return true
 
 func test_gamestate_selected_car_default() -> bool:

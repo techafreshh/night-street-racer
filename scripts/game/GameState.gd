@@ -59,7 +59,8 @@ func select_color(color_idx: int) -> void:
 
 
 ## Re-read user://save.json into both vars. Missing or corrupt files fall
-## back to defaults without erroring, and write-back stays suppressed.
+## back to defaults without erroring, non-numeric selected_color falls back
+## to 0, and write-back stays suppressed.
 func reload_from_disk() -> void:
 	_loading = true
 	var data := SaveSystem.load_game()
