@@ -140,8 +140,8 @@ static func save_game(data: Dictionary) -> bool:
 ## The settings overlay is allow-listed to the default_data() settings keys;
 ## unknown settings keys are discarded. The progress overlay is allow-listed
 ## to the default_data() progress keys; unknown progress keys are discarded.
-## Unknown top-level keys carry through verbatim for forward-compat (known
-## keys still merge over defaults; version stamp behavior unchanged).
+## Unknown top-level keys are discarded on load and never re-saved (known
+## keys still merge leniently over defaults; version stamp behavior unchanged).
 ## Records merge per-entry onto the default empty table: each raw entry is
 ## checked against the validate() predicates and corrupt entries are
 ## discarded while valid entries (including unknown per-entry keys) carry
@@ -205,10 +205,6 @@ static func load_game() -> Dictionary:
 				if floor(float(best_position)) != float(best_position):
 					continue
 			merged_records[key] = (entry as Dictionary).duplicate(true)
-	for key: Variant in raw.keys():
-		if key == "version" or key == "settings" or key == "progress" or key == "records":
-			continue
-		merged[key] = raw[key]
 	var raw_version: Variant = raw.get("version", SAVE_VERSION)
 	if (raw_version is int or raw_version is float) and int(raw_version) > SAVE_VERSION:
 		merged["version"] = int(raw_version)
