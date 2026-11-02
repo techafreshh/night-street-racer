@@ -103,7 +103,8 @@ func _on_garage() -> void:
 			var fallback := ""
 			if gs.has_method("get_default_car"):
 				fallback = String(gs.call("get_default_car"))
-			gs.select_car(fallback)
+			if gs.has_method("select_car"):
+				gs.call("select_car", fallback)
 		var current := &""
 		if gs.has_method("get_selected_car"):
 			current = StringName(gs.call("get_selected_car"))
@@ -223,7 +224,8 @@ func _on_event_chosen(route_id: String) -> void:
 		return
 	var gs = get_node_or_null("/root/GameState")
 	if gs != null:
-		gs.select_event(route_id)
+		if gs.has_method("select_event"):
+			gs.call("select_event", route_id)
 		print("EVENT_SELECTED %s" % route_id)
 	var tree := get_tree()
 	if tree == null:

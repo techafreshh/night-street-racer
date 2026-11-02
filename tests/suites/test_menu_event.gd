@@ -20,6 +20,7 @@ func get_test_names() -> Array[String]:
 		"test_event_grid_single_save_read",
 		"test_event_grid_no_per_button_reads",
 		"menu_typed_selection_reads",
+		"test_menu_event_writer_guarded",
 	]
 	return names
 
@@ -490,4 +491,92 @@ func menu_typed_selection_reads() -> bool:
 		ctx.tree.root.remove_child(gs)
 		gs.free()
 		await ctx.tree.process_frame
+	return true
+
+func test_menu_event_writer_guarded() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	ctx.check(src != "", "menu.gd source loads for the writer-guard probe")
+	if src == "":
+		return true
+	ctx.check(src.contains("has_method(\"select_event\")"), "menu guards the select_event writer")
+	ctx.check(src.contains("gs.call(\"select_event\""), "menu routes the event write through call")
+	ctx.check(not src.contains("gs.set(\"current_event\""), "menu keeps no untyped current_event writer")
+	ctx.check(src.contains("has_method(\"select_car\")"), "menu guards the select_car writer")
+	ctx.check(src.contains("gs.call(\"select_car\""), "menu routes the garage write through call")
+	ctx.check(not src.contains("gs.set(\"selected_car\""), "menu keeps no untyped selected_car writer")
+	ctx.check(src.contains("EVENT_SELECTED"), "menu keeps the EVENT_SELECTED token")
+	ctx.check(src.contains("CAR_SELECTED"), "menu keeps the CAR_SELECTED token")
+	var real_gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	if real_gs != null:
+		ctx.tree.root.remove_child(real_gs)
+		await ctx.tree.process_frame
+	var mock := Node.new()
+	mock.name = "GameState"
+	ctx.tree.root.add_child(mock)
+	await ctx.tree.process_frame
+	ctx.check(not mock.has_method("select_event"), "writer-less mock lacks select_event")
+	ctx.check(not mock.has_method("select_car"), "writer-less mock lacks select_car")
+	var detached := MenuUI.new()
+	ctx.tree.root.add_child(detached)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	detached._on_garage()
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(is_instance_valid(detached), "writer-less _on_garage does not error")
+	var garaged: Node = ctx.tree.current_scene
+	ctx.check(garaged != null and garaged != detached, "writer-less _on_garage still navigates")
+	if garaged != null and garaged != detached and is_instance_valid(garaged):
+		ctx.check(String(garaged.get("scene_file_path")).contains("garage") or garaged.find_child("CarGrid", true, false) != null, "writer-less _on_garage targets the garage scene")
+		if garaged.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(garaged)
+		garaged.free()
+		await ctx.tree.process_frame
+	detached._on_event_chosen("harbor_sprint")
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(is_instance_valid(detached), "writer-less _on_event_chosen does not error")
+	var navigated: Node = ctx.tree.current_scene
+	ctx.check(navigated != null and navigated != detached, "writer-less _on_event_chosen still navigates")
+	if navigated != null and navigated != detached and is_instance_valid(navigated):
+		ctx.check(String(navigated.get("scene_file_path")).contains("garage") or navigated.find_child("CarGrid", true, false) != null, "writer-less navigation targets the garage scene")
+		if navigated.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(navigated)
+		navigated.free()
+		await ctx.tree.process_frame
+	ctx.tree.root.remove_child(detached)
+	detached.free()
+	ctx.tree.root.remove_child(mock)
+	mock.free()
+	if real_gs != null:
+		ctx.tree.root.add_child(real_gs)
+		await ctx.tree.process_frame
+	var live_gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	ctx.check(live_gs != null, "GameState is restored for the guarded-write probe")
+	if live_gs == null:
+		return true
+	ctx.check(live_gs.has_method("select_event"), "GameState exposes select_event")
+	var prev := StringName(live_gs.get("current_event"))
+	live_gs.set("current_event", &"")
+	await ctx.tree.process_frame
+	var live_detached := MenuUI.new()
+	ctx.tree.root.add_child(live_detached)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	live_detached._on_event_chosen("harbor_sprint")
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	ctx.check(StringName(live_gs.get("current_event")) == &"harbor_sprint", "guarded write persists harbor_sprint with the real GameState")
+	var live_navigated: Node = ctx.tree.current_scene
+	if live_navigated != null and live_navigated != live_detached and is_instance_valid(live_navigated):
+		if live_navigated.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(live_navigated)
+		live_navigated.free()
+		await ctx.tree.process_frame
+	ctx.tree.root.remove_child(live_detached)
+	live_detached.free()
+	live_gs.set("current_event", prev)
+	if live_gs.has_method("flush"):
+		live_gs.call("flush")
+	await ctx.tree.process_frame
 	return true
