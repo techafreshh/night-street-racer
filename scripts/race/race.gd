@@ -15,6 +15,9 @@ const FALLBACK_CAR := "sedan"
 var _event_id := FALLBACK_EVENT
 var _manager: RaceEventManager = null
 var _route: RaceRoute = null
+## Cached personal best for the current event, loaded once in _bind_race so
+## the per-frame delta push never touches disk while RACING.
+var _cached_best := -1.0
 
 
 func _ready() -> void:
@@ -114,7 +117,8 @@ func _place_on_route(car: VehicleController) -> void:
 
 
 ## Per-frame live delta push: in time-trial mode with a stored best,
-## mirror race_time - best to the HUD DeltaLabel while RACING.
+## mirror race_time - best to the HUD DeltaLabel while RACING. Uses the
+## best cached in _bind_race; no disk reads happen here.
 func _process(_delta: float) -> void:
 	if _manager == null or _manager.state != RaceEventManager.State.RACING:
 		return
@@ -123,10 +127,9 @@ func _process(_delta: float) -> void:
 	var hud := get_node_or_null("HUD")
 	if hud == null or not hud.has_method("set_delta"):
 		return
-	var best := TimeTrial.get_best(_event_id)
-	if best <= 0.0:
+	if _cached_best <= 0.0:
 		return
-	hud.call("set_delta", _manager.race_time - best)
+	hud.call("set_delta", _manager.race_time - _cached_best)
 
 
 ## True when GameState selects the solo time-trial mode.
@@ -138,13 +141,15 @@ func _is_time_trial() -> bool:
 
 
 ## Bind the route gates to the manager flow, subscribe the finish handoff,
-## and seed the HUD through its existing setters only.
+## and seed the HUD through its existing setters only. Caches the stored
+## best once so the per-frame delta push stays off disk.
 func _bind_race() -> void:
 	if _manager != null and _route != null:
 		_manager.bind_route(_route)
 	if _manager != null:
 		if not _manager.race_finished.is_connected(_on_finished):
 			_manager.race_finished.connect(_on_finished)
+	_cached_best = TimeTrial.get_best(_event_id)
 	var hud := get_node_or_null("HUD")
 	if hud != null and hud.has_method("set_race_time"):
 		hud.call("set_race_time", 0.0)
@@ -155,14 +160,14 @@ func _bind_race() -> void:
 ## Record the solo player finish through a RacePositions table, hand it to
 ## GameState for the results screen when it exposes the writer, and change
 ## to results.tscn only when the scene exists; otherwise stay in-race (the
-## manager already printed FINISHED).
+## manager already printed FINISHED). Best-time compare-plus-write lives in
+## results.gd alone so the fresh-best banner path writes exactly once.
 func _on_finished() -> void:
 	var table := RacePositions.new()
 	var race_time := 0.0
 	if _manager != null:
 		race_time = _manager.race_time
 	table.record_finish("player", race_time)
-	TimeTrial.save_best_if_faster(_event_id, race_time)
 	var result := {
 		"event_id": _event_id,
 		"places": table.ordered_results(),
