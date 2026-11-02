@@ -57,6 +57,8 @@ func _run_all() -> void:
 		"test_garage_car_grid",
 		"test_garage_color_persists",
 		"test_event_select_grid",
+		"test_event_grid_async_defers_work",
+		"test_event_grid_async_completes",
 		"test_event_press_writes_current_event",
 		"test_event_select_grid_skips_invalid",
 		"test_vehicle_scene_loads",
@@ -1426,6 +1428,93 @@ func test_event_select_grid_skips_invalid() -> bool:
 	select.free()
 	await process_frame
 	return true
+
+func test_event_grid_async_defers_work() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	check(packed is PackedScene, "event_select.tscn loads as PackedScene for the deferral probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "event select instantiates for the deferral probe")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	# _ready prints its tokens and returns synchronously; the grid build is
+	# fire-and-forget, so the EventGrid must still be empty on this frame.
+	var grid := instance.find_child("EventGrid", true, false) as GridContainer
+	check(grid != null, "deferral probe has an EventGrid")
+	if grid != null:
+		check(grid.get_child_count() == 0, "grid is empty on the _ready frame (got %d)" % grid.get_child_count())
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	check(src.contains("load_threaded_request"), "menu.gd issues threaded loads off _ready")
+	check(src.contains("EVENT_GRID_READY"), "menu.gd prints EVENT_GRID_READY when the async grid completes")
+	check(src.contains("load_threaded_get_status"), "menu.gd polls threaded load status")
+	check(src.contains("_build_event_grid_async"), "menu.gd builds the grid via _build_event_grid_async")
+	await process_frame
+	await process_frame
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	return true
+
+
+func test_event_grid_async_completes() -> bool:
+	var packed = load("res://scenes/ui/event_select.tscn")
+	check(packed is PackedScene, "event_select.tscn loads as PackedScene for the completion probe")
+	if not (packed is PackedScene):
+		return true
+	var instance: Node = packed.instantiate()
+	check(instance != null, "event select instantiates for the completion probe")
+	if instance == null:
+		return true
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	var grid := instance.find_child("EventGrid", true, false) as GridContainer
+	check(grid != null, "completion probe has an EventGrid")
+	if grid == null:
+		root.remove_child(instance)
+		instance.free()
+		return true
+	var expected := 0
+	for path in MenuUI.EVENT_PATHS:
+		var asset := load(path) as RaceEvent
+		if asset != null and RaceEvent.validate(asset):
+			expected += 1
+	check(expected >= 5, "all 5 shipped events pass RaceEvent.validate() (got %d)" % expected)
+	check(grid.get_child_count() == expected, "async grid holds only validated events (%d vs %d)" % [grid.get_child_count(), expected])
+	for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]:
+		var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
+		check(ev != null, "%s loads as RaceEvent" % stem)
+		var btn := instance.find_child("Event_" + stem, true, false) as Button
+		check(btn != null, "async grid has a button for %s" % stem)
+		if btn == null:
+			continue
+		check(btn.custom_minimum_size == Vector2(320, 48), "%s keeps the 320x48 contract" % stem)
+		check(btn.text.contains(stem), "async button text names %s" % stem)
+		var should_lock := ev == null or not MenuUI.is_unlocked(ev)
+		check(btn.disabled == should_lock, "%s disabled matches lock state" % stem)
+		if should_lock:
+			check(btn.text.contains("Locked"), "%s locked text carries the lock suffix" % stem)
+			check(btn.focus_mode == Control.FOCUS_NONE, "%s locked button skips focus" % stem)
+		else:
+			check(not btn.text.contains("Locked"), "%s unlocked text has no lock suffix" % stem)
+			check(btn.focus_mode != Control.FOCUS_NONE, "%s unlocked button stays focusable" % stem)
+	var focused := root.gui_get_focus_owner()
+	var back := instance.find_child("BackButton", true, false) as BaseButton
+	check(focused != null, "async build leaves focus on an unlocked button or BackButton")
+	if focused != null:
+		var focused_name := str((focused as Node).name)
+		check(focused_name == "BackButton" or focused_name.begins_with("Event_"), "focus sits on %s" % focused_name)
+		if focused_name.begins_with("Event_"):
+			check(not (focused as BaseButton).disabled, "focus sits on an unlocked event (%s)" % focused_name)
+	if back != null and focused == null:
+		check(false, "focus owner is null despite BackButton existing")
+	root.remove_child(instance)
+	instance.free()
+	await process_frame
+	return true
+
 
 func test_vehicle_scene_loads() -> bool:
 	var packed = load("res://scenes/vehicles/vehicle_base.tscn")
