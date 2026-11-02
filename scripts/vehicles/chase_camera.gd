@@ -13,6 +13,7 @@ extends Camera3D
 @export var shake_amplitude := 0.06
 
 var _time := 0.0
+var _was_looking_back := false
 
 
 func _ready() -> void:
@@ -30,10 +31,22 @@ func _process(delta: float) -> void:
 	fov = lerpf(70.0, 85.0, t)
 	var car_basis := car.global_transform.basis
 	var fwd := -car_basis.z
+	# Look-back is view-only: while held, snap to the mirrored front slot
+	# and aim back at the car; on release snap back to the trail slot so
+	# the next frames resume the normal smoothed chase.
+	var looking_back := Input.is_action_pressed("look_back")
 	var target := car.global_position + car_basis.z * follow_distance + Vector3.UP * follow_height
-	var weight := 1.0 - exp(-position_smoothing * maxf(delta, 0.0001))
-	global_position = global_position.lerp(target, clampf(weight, 0.0, 1.0))
 	var look := car.global_position + fwd * lookahead_distance + Vector3.UP * 1.2
+	if looking_back:
+		target = car.global_position + fwd * follow_distance + Vector3.UP * follow_height
+		look = car.global_position - fwd * lookahead_distance + Vector3.UP * 1.2
+		global_position = target
+	elif _was_looking_back:
+		global_position = target
+	else:
+		var weight := 1.0 - exp(-position_smoothing * maxf(delta, 0.0001))
+		global_position = global_position.lerp(target, clampf(weight, 0.0, 1.0))
+	_was_looking_back = looking_back
 	var to_look := look - global_position
 	if to_look.length() > 0.05 and absf(to_look.normalized().dot(Vector3.UP)) < 0.999:
 		look_at(look, Vector3.UP)

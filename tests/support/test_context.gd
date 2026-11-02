@@ -30,7 +30,7 @@ func _make_ground() -> void:
 	tree.root.add_child(ground)
 
 func _release_inputs() -> void:
-	for action in ["accelerate", "brake", "steer_left", "steer_right", "handbrake", "reset_car"]:
+	for action in ["accelerate", "brake", "steer_left", "steer_right", "handbrake", "look_back", "reset_car", "pause"]:
 		Input.action_release(action)
 
 func _spawn_car(pos: Vector3, car_basis: Basis = Basis()) -> VehicleController:
