@@ -137,6 +137,8 @@ static func save_game(data: Dictionary) -> bool:
 ## Read the save document. Missing, unreadable, or corrupt files fall back
 ## to default_data(); valid documents merge leniently over the defaults so
 ## unknown future versions (and partial files) still apply their known keys.
+## Unknown top-level keys carry through verbatim for forward-compat (known
+## keys still merge over defaults; version stamp behavior unchanged).
 ## A numeric future version carries through as int so validate() still
 ## detects the mismatch; a missing, non-numeric, equal, or older version
 ## normalizes to SAVE_VERSION.
@@ -167,6 +169,10 @@ static func load_game() -> Dictionary:
 			progress[key] = saved_progress[key]
 	if raw.get("records") is Dictionary:
 		merged["records"] = raw["records"]
+	for key: Variant in raw.keys():
+		if key == "version" or key == "settings" or key == "progress" or key == "records":
+			continue
+		merged[key] = raw[key]
 	var raw_version: Variant = raw.get("version", SAVE_VERSION)
 	if (raw_version is int or raw_version is float) and int(raw_version) > SAVE_VERSION:
 		merged["version"] = int(raw_version)
