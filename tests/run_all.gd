@@ -114,6 +114,7 @@ func _run_all() -> void:
 		"test_car_scenes_load",
 		"hud_subscribes_to_race_signals",
 		"progression_string_list_drops_empty",
+		"test_progression_drops_empty_unlock_strings",
 		"top3_unlocks_next_event",
 		"win_unlocks_car",
 	]
@@ -3534,6 +3535,36 @@ func progression_string_list_drops_empty() -> bool:
 	check(SaveSystem.validate(reloaded), "apply_result load-modify-save from an empty-entry seed re-saves valid")
 	check(not ((reloaded["progress"] as Dictionary).get("unlocked_events", []) as Array).has(""), "re-saved unlocked_events holds no empty String")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "empty-entry probe restores defaults")
+	return true
+
+func test_progression_drops_empty_unlock_strings() -> bool:
+	var events := Progression._string_list(["", "harbor_sprint", "", &"", &"downtown_gp"])
+	check(events == (["harbor_sprint", "downtown_gp"] as Array[String]), "empty String and empty StringName entries are dropped in order")
+	var cars := Progression._string_list(["", "coupe", &""])
+	check(cars == (["coupe"] as Array[String]), "empty car entries are dropped, valid car survives")
+	var seeded := SaveSystem.default_data()
+	(seeded["progress"] as Dictionary)["unlocked_events"] = ["", "harbor_sprint", "", &""]
+	(seeded["progress"] as Dictionary)["unlocked_cars"] = ["", "coupe", &""]
+	check(SaveSystem.save_game(seeded), "empty-unlock probe writes the corrupt seed doc")
+	var snap := Progression.apply_result("downtown_gp", 3)
+	check(not (snap.get("unlocked_events", []) as Array).has(""), "apply_result snapshot holds no empty event entry")
+	check(not (snap.get("unlocked_cars", []) as Array).has(""), "apply_result snapshot holds no empty car entry")
+	check((snap.get("unlocked_events", []) as Array).has("harbor_sprint"), "seeded harbor_sprint survives apply_result")
+	check((snap.get("unlocked_cars", []) as Array).has("coupe"), "seeded coupe survives apply_result")
+	var reloaded := SaveSystem.load_game()
+	check(SaveSystem.validate(reloaded), "healed re-saved document passes SaveSystem.validate()")
+	check(not ((reloaded["progress"] as Dictionary).get("unlocked_events", []) as Array).has(""), "re-saved unlocked_events holds no empty String")
+	check(not ((reloaded["progress"] as Dictionary).get("unlocked_cars", []) as Array).has(""), "re-saved unlocked_cars holds no empty String")
+	var script = load("res://scripts/game/GameState.gd")
+	check(script != null, "GameState.gd loads for the empty-entry cache check")
+	if script != null:
+		var probe = script.new()
+		probe.reload_from_disk()
+		check(not (probe.get("unlocked_events") as Array).has(""), "fresh GameState cache holds no empty event entry")
+		check(not (probe.get("unlocked_cars") as Array).has(""), "fresh GameState cache holds no empty car entry")
+		check((probe.get("unlocked_events") as Array).has("harbor_sprint"), "fresh GameState cache keeps harbor_sprint")
+		probe.free()
+	check(SaveSystem.save_game(SaveSystem.default_data()), "empty-unlock probe restores defaults")
 	return true
 
 func top3_unlocks_next_event() -> bool:
