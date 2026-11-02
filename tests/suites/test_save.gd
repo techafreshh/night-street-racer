@@ -31,6 +31,7 @@ func get_test_names() -> Array[String]:
 		"settings_persist_across_load",
 		"test_gamestate_select_mode_validates",
 		"test_gamestate_direct_mode_assignment_guarded",
+		"test_gamestate_mode_consts_single_sourced",
 	]
 	return names
 
@@ -680,8 +681,8 @@ func test_gamestate_select_mode_validates() -> bool:
 	ctx.check(script != null, "GameState.gd loads for the mode validation probe")
 	if script == null:
 		return true
-	ctx.check(script.get("MODE_RACE") == &"race", "MODE_RACE is race")
-	ctx.check(script.get("MODE_TIME_TRIAL") == &"time_trial", "MODE_TIME_TRIAL is time_trial")
+	ctx.check(RaceEvent.MODE_RACE == &"race", "MODE_RACE is race")
+	ctx.check(RaceEvent.MODE_TIME_TRIAL == &"time_trial", "MODE_TIME_TRIAL is time_trial")
 	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "mode probe starts from defaults")
 	var node = script.new()
 	ctx.check(node != null, "GameState instantiates standalone for the mode probe")
@@ -737,8 +738,8 @@ func test_gamestate_direct_mode_assignment_guarded() -> bool:
 	ctx.check(script != null, "GameState.gd loads for the direct mode guard probe")
 	if script == null:
 		return true
-	ctx.check(script.get("MODE_RACE") == &"race", "MODE_RACE is race")
-	ctx.check(script.get("MODE_TIME_TRIAL") == &"time_trial", "MODE_TIME_TRIAL is time_trial")
+	ctx.check(RaceEvent.MODE_RACE == &"race", "MODE_RACE is race")
+	ctx.check(RaceEvent.MODE_TIME_TRIAL == &"time_trial", "MODE_TIME_TRIAL is time_trial")
 	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "mode guard probe starts from defaults")
 	var node = script.new()
 	ctx.check(node != null, "GameState instantiates standalone for the mode guard probe")
@@ -800,6 +801,47 @@ func test_gamestate_direct_mode_assignment_guarded() -> bool:
 	node.flush()
 	node.free()
 	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "mode guard probe restores defaults")
+	return true
+
+
+func test_gamestate_mode_consts_single_sourced() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/game/GameState.gd")
+	ctx.check(src != "", "GameState.gd source loads for the single-source check")
+	ctx.check(not src.contains("const MODE_RACE"), "GameState keeps no MODE_RACE definition (single sourced)")
+	ctx.check(not src.contains("const MODE_TIME_TRIAL"), "GameState keeps no MODE_TIME_TRIAL definition (single sourced)")
+	ctx.check(src.contains("RaceEvent.MODE_RACE"), "GameState routes through RaceEvent.MODE_RACE")
+	ctx.check(src.contains("RaceEvent.MODE_TIME_TRIAL"), "GameState routes through RaceEvent.MODE_TIME_TRIAL")
+	ctx.check(RaceEvent.MODE_RACE == &"race", "RaceEvent.MODE_RACE is race")
+	ctx.check(RaceEvent.MODE_TIME_TRIAL == &"time_trial", "RaceEvent.MODE_TIME_TRIAL is time_trial")
+	var ev_src := FileAccess.get_file_as_string("res://scripts/race/race_event.gd")
+	ctx.check(ev_src != "", "race_event.gd source loads for the single-source check")
+	ctx.check(ev_src.contains("const MODE_RACE"), "RaceEvent keeps the MODE_RACE definition")
+	ctx.check(ev_src.contains("const MODE_TIME_TRIAL"), "RaceEvent keeps the MODE_TIME_TRIAL definition")
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "single-source probe starts from defaults")
+	var script = load("res://scripts/game/GameState.gd")
+	ctx.check(script != null, "GameState.gd loads for the single-source probe")
+	if script == null:
+		return true
+	var node = script.new()
+	ctx.check(node != null, "GameState instantiates standalone for the single-source probe")
+	if node == null:
+		SaveSystem.save_game(SaveSystem.default_data())
+		return true
+	ctx.check(StringName(node.get("current_mode")) == RaceEvent.MODE_RACE, "fresh instance defaults to RaceEvent.MODE_RACE")
+	ctx.check(node.is_time_trial_mode() == false, "RaceEvent.MODE_RACE default is not time-trial mode")
+	ctx.check(node.is_valid_mode(RaceEvent.MODE_RACE), "RaceEvent.MODE_RACE passes is_valid_mode")
+	ctx.check(node.is_valid_mode(RaceEvent.MODE_TIME_TRIAL), "RaceEvent.MODE_TIME_TRIAL passes is_valid_mode")
+	ctx.check(not node.is_valid_mode(&"bogus"), "bogus fails is_valid_mode")
+	ctx.check(not node.is_valid_mode(&""), "empty fails is_valid_mode")
+	ctx.check(not node.is_valid_mode(&"RACE"), "wrong case fails is_valid_mode")
+	node.select_mode("time_trial")
+	ctx.check(StringName(node.get("current_mode")) == RaceEvent.MODE_TIME_TRIAL, "time_trial selection sticks through RaceEvent handles")
+	ctx.check(node.is_time_trial_mode(), "time_trial selection reads as time-trial mode")
+	node.select_mode("race")
+	ctx.check(StringName(node.get("current_mode")) == RaceEvent.MODE_RACE, "race selection sticks back through RaceEvent handles")
+	ctx.check(node.is_time_trial_mode() == false, "race selection is not time-trial mode")
+	node.free()
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "single-source probe restores defaults")
 	return true
 
 

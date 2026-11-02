@@ -16,10 +16,8 @@ extends Node
 ## the car_sedan.tscn tune); used to fill selected_car when empty.
 const DEFAULT_CAR: StringName = &"sedan"
 
-## Canonical run-mode handles (mirrors RaceEvent.MODE_RACE / MODE_TIME_TRIAL);
-## the closed allow-list for select_mode().
-const MODE_RACE: StringName = &"race"
-const MODE_TIME_TRIAL: StringName = &"time_trial"
+## Run-mode handles live in RaceEvent (RaceEvent.MODE_RACE /
+## RaceEvent.MODE_TIME_TRIAL); the closed allow-list for select_mode().
 
 ## True while bulk-loading from disk so the setters skip write-back.
 var _loading := false
@@ -67,13 +65,14 @@ var current_event: StringName = &"":
 var unlocked_events: Array = []
 var unlocked_cars: Array = []
 
-## Runtime-only run-mode selector (&"race" / &"time_trial"): never
-## persisted to user://save.json, so _persist/reload leave it untouched.
+## Runtime-only run-mode selector (RaceEvent.MODE_RACE /
+## RaceEvent.MODE_TIME_TRIAL): never persisted to user://save.json, so
+## _persist/reload leave it untouched.
 ## Direct assignment is guarded: only the two canonical handles stick,
 ## anything else is ignored with no persist side effect.
 ## Untyped so non-String/StringName writes reach the setter and are
 ## ignored instead of erroring on a typed-var assignment.
-var current_mode = &"race":
+var current_mode = RaceEvent.MODE_RACE:
 	set(value):
 		if not (value is String or value is StringName):
 			return
@@ -96,19 +95,20 @@ func select_event(route_id: String) -> void:
 	current_event = StringName(route_id)
 
 
-## Allow-list guard for the run-mode selector (mirrors the
-## RaceEvent.validate() mode-check shape): true only for the two
-## canonical handles.
+## Allow-list guard for the run-mode selector (same allow-list as
+## RaceEvent.validate()): true only for RaceEvent.MODE_RACE and
+## RaceEvent.MODE_TIME_TRIAL.
 static func is_valid_mode(m: StringName) -> bool:
-	return m == MODE_RACE or m == MODE_TIME_TRIAL
+	return m == RaceEvent.MODE_RACE or m == RaceEvent.MODE_TIME_TRIAL
 
 
 ## True when the in-memory run mode names the solo time-trial mode.
 func is_time_trial_mode() -> bool:
-	return current_mode == MODE_TIME_TRIAL
+	return current_mode == RaceEvent.MODE_TIME_TRIAL
 
 
-## Typed writer: record the run mode (race or time_trial) in memory only.
+## Typed writer: record the run mode (RaceEvent.MODE_RACE or
+## RaceEvent.MODE_TIME_TRIAL) in memory only.
 ## Funnels through the guarded current_mode setter, so unknown values
 ## (bogus, empty, wrong case, whitespace) are ignored: the last valid
 ## mode is kept with no persist side effect.
