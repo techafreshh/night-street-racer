@@ -141,6 +141,10 @@ static func save_game(data: Dictionary) -> bool:
 ## unknown settings keys are discarded.
 ## Unknown top-level keys carry through verbatim for forward-compat (known
 ## keys still merge over defaults; version stamp behavior unchanged).
+## Records merge per-entry onto the default empty table: each raw entry is
+## checked against the validate() predicates and corrupt entries are
+## discarded while valid entries (including unknown per-entry keys) carry
+## through verbatim via a deep duplicate.
 ## A numeric future version carries through as int so validate() still
 ## detects the mismatch; a missing, non-numeric, equal, or older version
 ## normalizes to SAVE_VERSION.
@@ -171,7 +175,34 @@ static func load_game() -> Dictionary:
 		for key: Variant in saved_progress.keys():
 			progress[key] = saved_progress[key]
 	if raw.get("records") is Dictionary:
-		merged["records"] = raw["records"]
+		var merged_records: Dictionary = merged["records"]
+		var saved_records: Dictionary = raw["records"]
+		for key: Variant in saved_records.keys():
+			if not (key is String):
+				continue
+			if (key as String).is_empty():
+				continue
+			var entry: Variant = saved_records[key]
+			if not (entry is Dictionary):
+				continue
+			if (entry as Dictionary).is_empty():
+				continue
+			var record: Dictionary = entry
+			if record.has("best_time_s"):
+				var best_time: Variant = record["best_time_s"]
+				if not (best_time is int or best_time is float):
+					continue
+				if float(best_time) <= BEST_TIME_MIN:
+					continue
+			if record.has("best_position"):
+				var best_position: Variant = record["best_position"]
+				if not (best_position is int or best_position is float):
+					continue
+				if float(best_position) < float(BEST_POSITION_MIN):
+					continue
+				if floor(float(best_position)) != float(best_position):
+					continue
+			merged_records[key] = (entry as Dictionary).duplicate(true)
 	for key: Variant in raw.keys():
 		if key == "version" or key == "settings" or key == "progress" or key == "records":
 			continue
