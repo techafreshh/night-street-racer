@@ -112,6 +112,8 @@ func _run_all() -> void:
 		"results_hold_all_finishers",
 		"test_results_scene_loads",
 		"test_results_applies_unlock_and_best",
+		"test_results_retry_goes_to_race",
+		"test_results_esc_goes_back",
 		"test_car_kit_glb_present",
 		"test_car_kit_credits",
 		"test_car_scenes_load",
@@ -4218,4 +4220,158 @@ func test_garage_esc_goes_back() -> bool:
 			instance.free()
 			await process_frame
 	check(SaveSystem.save_game(SaveSystem.default_data()), "garage Esc probe restores defaults")
+	return true
+
+func test_results_retry_goes_to_race() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/results.gd")
+	check(src != "", "results.gd source loads for the retry probe")
+	var start := src.find("func _on_retry")
+	check(start >= 0, "results.gd keeps an _on_retry handler")
+	var body := ""
+	if start >= 0:
+		var rest := src.substr(start)
+		var next := rest.find("\nfunc ", 1)
+		body = rest.substr(0, next) if next >= 0 else rest
+	check(body.contains("race_"), "retry targets a race_ scene")
+	check(not body.contains("results.tscn"), "retry no longer reloads results.tscn")
+	check(body.contains("ResourceLoader.exists"), "retry guards the race path with ResourceLoader.exists")
+	check(body.contains("race_harbor_sprint.tscn"), "retry falls back to race_harbor_sprint.tscn")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "retry probe starts from defaults")
+	var gs: Node = root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		check(gs_script != null, "GameState.gd loads for the retry probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		root.add_child(gs)
+		mounted = true
+	check(gs != null, "GameState singleton is reachable for the retry probe")
+	if gs == null:
+		return true
+	check(gs.has_method("set_last_result"), "GameState exposes set_last_result for the retry probe")
+	var mock := {
+		"event_id": "harbor_sprint",
+		"player_racer": "player",
+		"places": [
+			{"racer": "player", "time_s": 88.2, "place": 1},
+			{"racer": "ai_1", "time_s": 91.0, "place": 2},
+			{"racer": "ai_2", "time_s": 95.5, "place": 3},
+			{"racer": "ai_3", "time_s": 102.7, "place": 4},
+			{"racer": "ai_4", "time_s": 105.3, "place": 5},
+		],
+	}
+	gs.call("set_last_result", mock)
+	var packed = load("res://scenes/ui/results.tscn")
+	check(packed is PackedScene, "results.tscn loads as PackedScene for the retry probe")
+	if not (packed is PackedScene):
+		gs.call("clear_last_result")
+		if mounted:
+			root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	root.add_child(instance)
+	await process_frame
+	await process_frame
+	check(is_instance_valid(instance), "results instance stays valid until retry navigation")
+	var retry := instance.find_child("RetryButton", true, false) as BaseButton
+	check(retry != null, "results has a RetryButton for the retry probe")
+	if retry != null:
+		retry.pressed.emit()
+		await process_frame
+		await process_frame
+		var swapped := current_scene
+		check(swapped != null and swapped != instance, "retry leaves Results")
+		check(swapped != null and String(swapped.get("scene_file_path")).contains("race_harbor_sprint"), "retry re-races harbor_sprint (got %s)" % String(swapped.get("scene_file_path")) if swapped != null else "retry re-races harbor_sprint")
+		check(swapped != null and swapped.get_node_or_null("EventManager") != null, "retry lands on a race scene holding EventManager")
+		check(swapped != null and swapped.get_node_or_null("Route") != null, "retry lands on a race scene holding Route")
+		if swapped != null and swapped != instance and is_instance_valid(swapped):
+			if swapped.get_parent() == root:
+				root.remove_child(swapped)
+			swapped.free()
+			await process_frame
+	if is_instance_valid(instance):
+		if instance.get_parent() == root:
+			root.remove_child(instance)
+		instance.free()
+		await process_frame
+	var fallback_inst: Node = packed.instantiate()
+	root.add_child(fallback_inst)
+	await process_frame
+	await process_frame
+	fallback_inst.set("_event_id", "no_such_event")
+	var fallback_retry := fallback_inst.find_child("RetryButton", true, false) as BaseButton
+	check(fallback_retry != null, "results keeps a RetryButton for the fallback probe")
+	if fallback_retry != null:
+		fallback_retry.pressed.emit()
+		await process_frame
+		await process_frame
+		var fallback_swapped := current_scene
+		check(fallback_swapped != null and fallback_swapped != fallback_inst, "fallback retry leaves Results")
+		check(fallback_swapped != null and String(fallback_swapped.get("scene_file_path")).contains("race_harbor_sprint"), "unknown event falls back to race_harbor_sprint")
+		if fallback_swapped != null and fallback_swapped != fallback_inst and is_instance_valid(fallback_swapped):
+			if fallback_swapped.get_parent() == root:
+				root.remove_child(fallback_swapped)
+			fallback_swapped.free()
+			await process_frame
+	if is_instance_valid(fallback_inst):
+		if fallback_inst.get_parent() == root:
+			root.remove_child(fallback_inst)
+		fallback_inst.free()
+		await process_frame
+	gs.call("clear_last_result")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "retry probe restores defaults")
+	if mounted:
+		root.remove_child(gs)
+		gs.free()
+		await process_frame
+	return true
+
+func test_results_esc_goes_back() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/results.gd")
+	check(src != "", "results.gd source loads for the Esc probe")
+	var start := src.find("func _unhandled_input")
+	check(start >= 0, "results.gd keeps an _unhandled_input handler")
+	var body := ""
+	if start >= 0:
+		var rest := src.substr(start)
+		var next := rest.find("\nfunc ", 1)
+		body = rest.substr(0, next) if next >= 0 else rest
+	check(not body.contains("quit"), "results Esc path never quits")
+	check(body.contains("_on_menu"), "results Esc routes through _on_menu")
+	check(src.contains("main_menu.tscn"), "results Esc target stays main_menu.tscn")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "results Esc probe starts from defaults")
+	for action_name in [&"pause", &"ui_cancel"]:
+		var packed = load("res://scenes/ui/results.tscn")
+		check(packed is PackedScene, "results.tscn loads as PackedScene for the Esc probe")
+		if not (packed is PackedScene):
+			continue
+		var instance: Node = packed.instantiate()
+		root.add_child(instance)
+		await process_frame
+		await process_frame
+		check(is_instance_valid(instance), "results instance stays valid until %s navigation" % String(action_name))
+		var ev := InputEventAction.new()
+		ev.action = action_name
+		ev.pressed = true
+		instance.call("_unhandled_input", ev)
+		await process_frame
+		await process_frame
+		var swapped := current_scene
+		check(swapped != null and swapped != instance, "results %s leaves Results" % String(action_name))
+		check(swapped != null and swapped.find_child("RaceButton", true, false) != null, "results %s navigates home to a scene holding RaceButton" % String(action_name))
+		if swapped != null and swapped != instance and is_instance_valid(swapped):
+			if swapped.get_parent() == root:
+				root.remove_child(swapped)
+			swapped.free()
+			await process_frame
+		if is_instance_valid(instance):
+			if instance.get_parent() == root:
+				root.remove_child(instance)
+			instance.free()
+			await process_frame
+	check(SaveSystem.save_game(SaveSystem.default_data()), "results Esc probe restores defaults")
 	return true

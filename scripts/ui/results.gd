@@ -41,7 +41,10 @@ func _ready() -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("pause") or event.is_action_pressed("ui_cancel"):
-		get_tree().quit()
+		# Results is never an exit target: Esc routes home so a composed
+		# race/pause stack keeps Esc for pausing; ending the run takes an
+		# explicit button, and results has none.
+		_on_menu()
 
 
 ## Race clock in seconds; results show zero-padded mm:ss.mmm.
@@ -260,10 +263,16 @@ func _on_next() -> void:
 
 
 func _on_retry() -> void:
+	var event_id := _event_id
+	if event_id.is_empty():
+		event_id = MOCK_EVENT
+	var path := "res://scenes/races/race_%s.tscn" % event_id
+	if not ResourceLoader.exists(path):
+		path = "res://scenes/races/race_harbor_sprint.tscn"
 	var tree := get_tree()
 	if tree == null:
 		return
-	tree.change_scene_to_file("res://scenes/ui/results.tscn")
+	tree.change_scene_to_file(path)
 
 
 func _on_menu() -> void:
