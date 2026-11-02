@@ -224,6 +224,23 @@ func test_save_system_roundtrip() -> bool:
 	var blank := SaveSystem.default_data()
 	check(SaveSystem.validate(blank), "default_data passes SaveSystem.validate()")
 	check(int((blank["progress"] as Dictionary).get("selected_color")) == 0, "default selected_color is int 0")
+	var bool_version := SaveSystem.default_data()
+	bool_version["version"] = true
+	check(not SaveSystem.validate(bool_version), "bool version fails SaveSystem.validate()")
+	var string_version := SaveSystem.default_data()
+	string_version["version"] = "1"
+	check(not SaveSystem.validate(string_version), "String version fails SaveSystem.validate()")
+	var float_version := SaveSystem.default_data()
+	float_version["version"] = 1.0
+	check(not SaveSystem.validate(float_version), "float version fails SaveSystem.validate()")
+	var missing_version := SaveSystem.default_data()
+	missing_version.erase("version")
+	check(not SaveSystem.validate(missing_version), "missing version fails SaveSystem.validate()")
+	var wrong_version := SaveSystem.default_data()
+	wrong_version["version"] = 2
+	check(not SaveSystem.validate(wrong_version), "version 2 fails SaveSystem.validate()")
+	var int_version := SaveSystem.default_data()
+	check(SaveSystem.validate(int_version), "int version passes SaveSystem.validate()")
 	var float_color := SaveSystem.default_data()
 	(float_color["progress"] as Dictionary)["selected_color"] = 2.0
 	check(SaveSystem.validate(float_color), "float selected_color validates as JSON round-trip equivalent")

@@ -45,7 +45,9 @@ static func default_data() -> Dictionary:
 	}
 
 
-## Strict shape check: version must equal SAVE_VERSION, the progress
+## Strict shape check: version must be strictly int and equal SAVE_VERSION
+## (bool/float/String rejected; lenient float handling lives in
+## load_game(), not here), the progress
 ## selected_car/current_event keys must be strings and selected_color must be
 ## numeric (int or float; float covers JSON round-trip coercion). Settings must
 ## hold all five default_data() keys with the three volumes numeric within
@@ -58,7 +60,10 @@ static func default_data() -> Dictionary:
 ## is still enforced), with unknown per-entry keys ignored.
 ## Lenient future-version merging lives in load_game(), not here.
 static func validate(data: Dictionary) -> bool:
-	if int(data.get("version", -1)) != SAVE_VERSION:
+	var version: Variant = data.get("version", -1)
+	if not (version is int):
+		return false
+	if version != SAVE_VERSION:
 		return false
 	var settings: Variant = data.get("settings")
 	if not (settings is Dictionary):
