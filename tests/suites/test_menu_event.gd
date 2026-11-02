@@ -19,6 +19,7 @@ func get_test_names() -> Array[String]:
 		"test_event_select_grid_skips_invalid",
 		"test_event_grid_single_save_read",
 		"test_event_grid_no_per_button_reads",
+		"menu_typed_selection_reads",
 	]
 	return names
 
@@ -386,4 +387,107 @@ func test_event_grid_no_per_button_reads() -> bool:
 		var table_next := table_rest.find("\nstatic func ", 1)
 		var table_body := table_rest.substr(0, table_next) if table_next >= 0 else table_rest
 		ctx.check(not table_body.contains("load_game"), "_best_from_table evaluates with no disk read")
+	return true
+
+func menu_typed_selection_reads() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	ctx.check(src != "", "menu.gd source loads for the typed-reads probe")
+	if src == "":
+		return true
+	ctx.check(src.contains("has_method(\"get_selected_car\")"), "menu guards the get_selected_car reader")
+	ctx.check(src.contains("gs.call(\"get_selected_car\")"), "menu routes the car read through get_selected_car")
+	ctx.check(src.contains("has_method(\"get_default_car\")"), "menu guards the get_default_car reader")
+	ctx.check(src.contains("gs.call(\"get_default_car\")"), "menu routes the default read through get_default_car")
+	ctx.check(not src.contains("gs.get(\"selected_car\")"), "menu keeps no stringly selected_car read")
+	ctx.check(not src.contains("gs.get(\"DEFAULT_CAR\")"), "menu keeps no stringly DEFAULT_CAR read")
+	ctx.check(src.contains("CAR_SELECTED"), "menu keeps the CAR_SELECTED token")
+	ctx.check(src.contains("select_car"), "menu keeps the typed select_car writer")
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		ctx.check(gs_script != null, "GameState.gd loads for the menu typed-reads probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		ctx.tree.root.add_child(gs)
+		mounted = true
+		await ctx.tree.process_frame
+	ctx.check(gs != null, "GameState singleton is reachable for the menu typed-reads probe")
+	if gs == null:
+		return true
+	ctx.check(gs.has_method("get_selected_car"), "GameState exposes get_selected_car")
+	ctx.check(gs.has_method("get_default_car"), "GameState exposes get_default_car")
+	var prev := StringName(gs.get("selected_car"))
+	gs.call("select_car", "hatch")
+	await ctx.tree.process_frame
+	ctx.check(StringName(gs.call("get_selected_car")) == &"hatch", "typed writer flows to the typed reader (got %s)" % String(gs.call("get_selected_car")))
+	var packed = load("res://scenes/ui/main_menu.tscn")
+	ctx.check(packed is PackedScene, "main_menu.tscn loads for the menu typed-reads probe")
+	if not (packed is PackedScene):
+		gs.set("selected_car", prev)
+		if mounted:
+			ctx.tree.root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var garage_btn := instance.find_child("GarageButton", true, false) as BaseButton
+	ctx.check(garage_btn != null, "main menu has GarageButton for the typed-reads probe")
+	if garage_btn != null:
+		garage_btn.pressed.emit()
+		await ctx.tree.process_frame
+		await ctx.tree.process_frame
+		ctx.check(StringName(gs.call("get_selected_car")) == &"hatch", "Garage press never clobbers a pre-set car (got %s)" % String(gs.call("get_selected_car")))
+		var live := ctx.tree.current_scene
+		ctx.check(live != null and live != instance, "Garage press leaves MainMenu")
+		if live != null and live != instance and is_instance_valid(live):
+			if live.get_parent() == ctx.tree.root:
+				ctx.tree.root.remove_child(live)
+			live.free()
+			await ctx.tree.process_frame
+	gs.set("selected_car", &"")
+	await ctx.tree.process_frame
+	var fresh: Node = packed.instantiate()
+	ctx.tree.root.add_child(fresh)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var fresh_btn := fresh.find_child("GarageButton", true, false) as BaseButton
+	ctx.check(fresh_btn != null, "fresh menu has GarageButton for the fill-default probe")
+	if fresh_btn != null:
+		fresh_btn.pressed.emit()
+		await ctx.tree.process_frame
+		await ctx.tree.process_frame
+		ctx.check(StringName(gs.call("get_selected_car")) == &"sedan", "empty selection fills the default sedan (got %s)" % String(gs.call("get_selected_car")))
+		var filled := ctx.tree.current_scene
+		if filled != null and filled != fresh and is_instance_valid(filled):
+			if filled.get_parent() == ctx.tree.root:
+				ctx.tree.root.remove_child(filled)
+			filled.free()
+			await ctx.tree.process_frame
+	if is_instance_valid(fresh):
+		if fresh.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(fresh)
+		fresh.free()
+		await ctx.tree.process_frame
+	if is_instance_valid(instance):
+		if instance.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(instance)
+		instance.free()
+		await ctx.tree.process_frame
+	var swapped := ctx.tree.current_scene
+	if swapped != null and swapped != instance and swapped != fresh and is_instance_valid(swapped):
+		if swapped.get_parent() == ctx.tree.root:
+			ctx.tree.root.remove_child(swapped)
+		swapped.free()
+		await ctx.tree.process_frame
+	gs.set("selected_car", prev)
+	await ctx.tree.process_frame
+	if mounted:
+		ctx.tree.root.remove_child(gs)
+		gs.free()
+		await ctx.tree.process_frame
 	return true

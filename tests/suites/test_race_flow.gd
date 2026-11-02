@@ -40,6 +40,7 @@ func get_test_names() -> Array[String]:
 		"test_menu_esc_never_quits",
 		"test_garage_esc_goes_back",
 		"race_typed_selection_reads",
+		"results_typed_handoff_read",
 	]
 	return names
 
@@ -1452,3 +1453,97 @@ func race_typed_selection_reads() -> bool:
 		gs.free()
 		await ctx.tree.process_frame
 	return true
+
+func results_typed_handoff_read() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/results.gd")
+	ctx.check(src != "", "results.gd source loads for the typed-handoff probe")
+	if src == "":
+		return true
+	ctx.check(src.contains("has_method(\"get_last_result\")"), "results guards the get_last_result reader")
+	ctx.check(src.contains("gs.call(\"get_last_result\")"), "results routes the handoff read through get_last_result")
+	ctx.check(not src.contains("gs.get(\"last_result\")"), "results keeps no stringly last_result read")
+	ctx.check(gs_has_typed_results_reader(), "GameState exposes get_last_result")
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "handoff probe starts from defaults")
+	var gs: Node = ctx.tree.root.get_node_or_null("GameState")
+	var mounted := false
+	if gs == null:
+		var gs_script = load("res://scripts/game/GameState.gd")
+		ctx.check(gs_script != null, "GameState.gd loads for the handoff probe")
+		if gs_script == null:
+			return true
+		gs = gs_script.new()
+		gs.name = "GameState"
+		ctx.tree.root.add_child(gs)
+		mounted = true
+		await ctx.tree.process_frame
+	ctx.check(gs != null, "GameState singleton is reachable for the handoff probe")
+	if gs == null:
+		return true
+	var handoff := {
+		"event_id": "harbor_sprint",
+		"player_racer": "player",
+		"places": [
+			{"racer": "player", "time_s": 88.2, "place": 1},
+			{"racer": "ai_1", "time_s": 91.0, "place": 2},
+		],
+	}
+	gs.call("set_last_result", handoff)
+	await ctx.tree.process_frame
+	var seen := gs.call("get_last_result") as Dictionary
+	ctx.check((seen.get("places", []) as Array).size() == 2, "typed handoff reader returns the 2 seeded rows")
+	var packed = load("res://scenes/ui/results.tscn")
+	ctx.check(packed is PackedScene, "results.tscn loads for the handoff probe")
+	if not (packed is PackedScene):
+		gs.call("clear_last_result")
+		if mounted:
+			ctx.tree.root.remove_child(gs)
+			gs.free()
+		return true
+	var instance: Node = packed.instantiate()
+	ctx.tree.root.add_child(instance)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var grid := instance.find_child("ResultsList", true, false) as VBoxContainer
+	ctx.check(grid != null, "handoff probe has a ResultsList")
+	if grid != null:
+		ctx.check(grid.get_child_count() == 2, "ResultsList renders the 2 handoff rows (got %d)" % grid.get_child_count())
+		var player_rows := 0
+		for child in grid.get_children():
+			var row := child as Label
+			ctx.check(row != null, "handoff row %s is a Label" % str(child.name))
+			if row != null and row.text.contains("player"):
+				player_rows += 1
+				ctx.check(row.text.begins_with("▶ "), "handoff player row carries the highlight marker")
+		ctx.check(player_rows == 1, "exactly one handoff player row is highlighted (got %d)" % player_rows)
+	ctx.tree.root.remove_child(instance)
+	instance.free()
+	await ctx.tree.process_frame
+	gs.call("clear_last_result")
+	await ctx.tree.process_frame
+	var fallback_inst: Node = packed.instantiate()
+	ctx.tree.root.add_child(fallback_inst)
+	await ctx.tree.process_frame
+	await ctx.tree.process_frame
+	var fallback_grid := fallback_inst.find_child("ResultsList", true, false) as VBoxContainer
+	ctx.check(fallback_grid != null, "mock probe has a ResultsList")
+	if fallback_grid != null:
+		ctx.check(fallback_grid.get_child_count() == 5, "cleared handoff falls back to the 5-row mock (got %d)" % fallback_grid.get_child_count())
+	ctx.tree.root.remove_child(fallback_inst)
+	fallback_inst.free()
+	await ctx.tree.process_frame
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "handoff probe restores defaults")
+	if mounted:
+		ctx.tree.root.remove_child(gs)
+		gs.free()
+		await ctx.tree.process_frame
+	return true
+
+
+func gs_has_typed_results_reader() -> bool:
+	var script = load("res://scripts/game/GameState.gd")
+	if script == null:
+		return false
+	var probe = script.new()
+	var ok: bool = probe.has_method("get_last_result")
+	probe.free()
+	return ok

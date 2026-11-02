@@ -141,6 +141,11 @@ func select_color(color_idx: int) -> void:
 	selected_color = color_idx
 
 
+## Typed reader: return the chosen paint index.
+func get_selected_color() -> int:
+	return selected_color
+
+
 ## In-memory post-race handoff for the results screen (issue #22): never
 ## written to user://save.json, so the save schema is untouched. Reads live
 ## here; the race sets it before changing to scenes/ui/results.tscn and the
@@ -156,6 +161,11 @@ func set_last_result(result: Dictionary) -> void:
 ## Typed writer: drop the handoff so the next boot falls back to the mock.
 func clear_last_result() -> void:
 	last_result = {}
+
+
+## Typed reader: return a duplicate of the result dict for the results screen.
+func get_last_result() -> Dictionary:
+	return last_result.duplicate(true)
 
 
 ## Thin wrapper: record a result through the ladder, then refresh the cache.
