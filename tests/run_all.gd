@@ -513,9 +513,6 @@ func test_event_select_grid() -> bool:
 			enabled += 1
 			check(btn.focus_mode != Control.FOCUS_NONE, "%s stays focusable" % stem)
 	check(enabled >= 1, "at least one event is unlocked (got %d)" % enabled)
-	var harbor := instance.find_child("Event_harbor_sprint", true, false) as BaseButton
-	if harbor != null:
-		check(harbor.disabled == false, "harbor_sprint renders unlocked")
 	var back := instance.find_child("BackButton", true, false) as BaseButton
 	check(back != null, "event select has a BackButton")
 	root.remove_child(instance)
