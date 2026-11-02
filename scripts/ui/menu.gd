@@ -129,6 +129,9 @@ func _build_event_grid() -> void:
 		var ev := load(path) as RaceEvent
 		if ev == null:
 			continue
+		if not RaceEvent.validate(ev):
+			push_warning("MenuUI: skipping invalid event %s" % path)
+			continue
 		var btn := Button.new()
 		btn.name = "Event_%s" % ev.route_id
 		btn.custom_minimum_size = Vector2(320, 48)

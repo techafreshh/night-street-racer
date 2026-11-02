@@ -38,6 +38,7 @@ func _run_all() -> void:
 		"test_menu_buttons",
 		"test_garage_writes_selected_car",
 		"test_event_select_grid",
+		"test_event_select_grid_skips_invalid",
 		"test_vehicle_scene_loads",
 		"test_accel_reaches_25ms_in_8s",
 		"test_coast_upshifts_without_throttle",
@@ -376,6 +377,59 @@ func test_event_select_grid() -> bool:
 	check(back != null, "event select has a BackButton")
 	root.remove_child(instance)
 	instance.free()
+	await process_frame
+	return true
+
+func test_event_select_grid_skips_invalid() -> bool:
+	var base := load("res://assets/events/harbor_sprint.tres") as RaceEvent
+	check(base != null, "harbor_sprint loads as the filter baseline")
+	if base == null:
+		return true
+	check(RaceEvent.validate(base), "filter baseline passes RaceEvent.validate()")
+	var bad_laps := base.duplicate() as RaceEvent
+	bad_laps.laps = 99
+	check(not RaceEvent.validate(bad_laps), "laps=99 fails RaceEvent.validate()")
+	var bad_gates := base.duplicate() as RaceEvent
+	bad_gates.checkpoints = PackedVector3Array([Vector3(0, 1, 0), Vector3(10, 1, 0)])
+	check(not RaceEvent.validate(bad_gates), "fewer than 4 gates fails RaceEvent.validate()")
+	var bad_radius := base.duplicate() as RaceEvent
+	bad_radius.checkpoint_radius = 99.0
+	check(not RaceEvent.validate(bad_radius), "out-of-range radius fails RaceEvent.validate()")
+	var packed = load("res://scenes/ui/event_select.tscn")
+	check(packed is PackedScene, "event_select.tscn loads for the filter check")
+	if not (packed is PackedScene):
+		return true
+	var select: Node = packed.instantiate()
+	root.add_child(select)
+	await process_frame
+	await process_frame
+	var grid := select.find_child("EventGrid", true, false) as GridContainer
+	check(grid != null, "event select has an EventGrid for the filter check")
+	if grid == null:
+		root.remove_child(select)
+		select.free()
+		return true
+	var expected := 0
+	for path in MenuUI.EVENT_PATHS:
+		var asset := load(path) as RaceEvent
+		if asset != null and RaceEvent.validate(asset):
+			expected += 1
+	check(expected >= 5, "all 5 shipped events pass RaceEvent.validate() (got %d)" % expected)
+	check(grid.get_child_count() == expected, "grid holds only validated events (%d vs %d)" % [grid.get_child_count(), expected])
+	for child in grid.get_children():
+		var btn := child as Button
+		check(btn != null, "grid child %s is a Button" % str(child.name))
+		if btn == null:
+			continue
+		var stem := str(btn.name).trim_prefix("Event_")
+		check(stem != str(btn.name), "grid button name carries an Event_ stem (%s)" % str(btn.name))
+		var backed := load("res://assets/events/%s.tres" % stem) as RaceEvent
+		check(backed != null, "grid button %s backs a RaceEvent asset" % stem)
+		if backed != null:
+			check(RaceEvent.validate(backed), "grid button %s backs a validated event" % stem)
+	check(select.find_child("Event_bogus_event", true, false) == null, "no button exists for a synthetic invalid stem")
+	root.remove_child(select)
+	select.free()
 	await process_frame
 	return true
 
