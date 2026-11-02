@@ -132,6 +132,8 @@ static func save_game(data: Dictionary) -> bool:
 ## Read the save document. Missing, unreadable, or corrupt files fall back
 ## to default_data(); valid documents merge leniently over the defaults so
 ## unknown future versions (and partial files) still apply their known keys.
+## The on-disk version carries through verbatim so validate() still detects
+## mismatches; a missing version key defaults to SAVE_VERSION.
 static func load_game() -> Dictionary:
 	var fallback := default_data()
 	if not FileAccess.file_exists(SAVE_PATH):
@@ -159,5 +161,5 @@ static func load_game() -> Dictionary:
 			progress[key] = saved_progress[key]
 	if raw.get("records") is Dictionary:
 		merged["records"] = raw["records"]
-	merged["version"] = SAVE_VERSION
+	merged["version"] = raw.get("version", SAVE_VERSION)
 	return merged
