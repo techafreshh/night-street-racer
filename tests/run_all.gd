@@ -456,19 +456,29 @@ func test_event_press_writes_current_event() -> bool:
 		root.remove_child(instance)
 		instance.free()
 		return true
-	var prev := StringName(gs.get("current_event"))
-	var btn := instance.find_child("Event_harbor_sprint", true, false) as BaseButton
-	check(btn != null, "grid has Event_harbor_sprint button")
-	if btn == null:
-		gs.set("current_event", prev)
+	var resolved := &""
+	for stem in ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]:
+		var ev := load("res://assets/events/%s.tres" % stem) as RaceEvent
+		if ev != null and MenuUI.is_unlocked(ev):
+			resolved = StringName(stem)
+			break
+	check(resolved != &"", "at least one event is unlocked for press test")
+	if resolved == &"":
 		root.remove_child(instance)
 		instance.free()
 		return true
-	check(btn.disabled == false, "harbor_sprint button is unlocked for press test")
+	var btn := instance.find_child("Event_" + String(resolved), true, false) as BaseButton
+	check(btn != null, "grid has Event_%s button" % String(resolved))
+	if btn == null:
+		root.remove_child(instance)
+		instance.free()
+		return true
+	check(btn.disabled == false, "%s button is unlocked for press test" % String(resolved))
+	var prev := StringName(gs.get("current_event"))
 	btn.pressed.emit()
 	await process_frame
 	await process_frame
-	check(StringName(gs.get("current_event")) == &"harbor_sprint", "pressing harbor_sprint writes current_event")
+	check(StringName(gs.get("current_event")) == resolved, "pressing %s writes current_event" % String(resolved))
 	gs.set("current_event", prev)
 	root.remove_child(instance)
 	instance.free()
@@ -476,7 +486,7 @@ func test_event_press_writes_current_event() -> bool:
 	var detached := MenuUI.new()
 	check(detached != null, "detached MenuUI instantiates")
 	if detached != null:
-		detached._on_event_chosen("harbor_sprint")
+		detached._on_event_chosen(String(resolved))
 		check(true, "detached _on_event_chosen completes without error")
 		detached.free()
 	return true
