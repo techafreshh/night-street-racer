@@ -288,6 +288,23 @@ func test_save_system_roundtrip() -> bool:
 	var unlock_empty_entry := SaveSystem.default_data()
 	(unlock_empty_entry["progress"] as Dictionary)["unlocked_cars"] = [""]
 	check(not SaveSystem.validate(unlock_empty_entry), "empty-String unlock entry fails SaveSystem.validate()")
+	var stringname_car := SaveSystem.default_data()
+	(stringname_car["progress"] as Dictionary)["selected_car"] = &"hatch"
+	check(SaveSystem.validate(stringname_car), "StringName selected_car validates")
+	var stringname_event := SaveSystem.default_data()
+	(stringname_event["progress"] as Dictionary)["current_event"] = &"neon_loop"
+	check(SaveSystem.validate(stringname_event), "StringName current_event validates")
+	var unlock_stringname := SaveSystem.default_data()
+	(unlock_stringname["progress"] as Dictionary)["unlocked_events"] = [&"harbor_sprint"]
+	(unlock_stringname["progress"] as Dictionary)["unlocked_cars"] = [&"coupe"]
+	check(SaveSystem.validate(unlock_stringname), "StringName unlock entries validate")
+	var unlock_mixed := SaveSystem.default_data()
+	(unlock_mixed["progress"] as Dictionary)["unlocked_events"] = ["harbor_sprint", &"downtown_gp"]
+	(unlock_mixed["progress"] as Dictionary)["unlocked_cars"] = ["coupe", &"hatch"]
+	check(SaveSystem.validate(unlock_mixed), "mixed String/StringName unlock entries validate")
+	var unlock_empty_stringname := SaveSystem.default_data()
+	(unlock_empty_stringname["progress"] as Dictionary)["unlocked_cars"] = [&""]
+	check(not SaveSystem.validate(unlock_empty_stringname), "empty-StringName unlock entry fails SaveSystem.validate()")
 	var default_settings := SaveSystem.default_data()
 	check(SaveSystem.validate(default_settings), "default settings validate")
 	var bad_volume := SaveSystem.default_data()

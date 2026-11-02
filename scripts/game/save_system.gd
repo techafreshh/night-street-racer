@@ -50,10 +50,12 @@ static func default_data() -> Dictionary:
 ## Strict shape check: version must be strictly int and equal SAVE_VERSION
 ## (bool/float/String rejected; lenient float handling lives in
 ## load_game(), not here), the progress
-## selected_car/current_event keys must be strings, selected_color must be
+## selected_car/current_event keys must be String or StringName (StringName
+## covers in-memory GameState selections; JSON parses to String),
+## selected_color must be
 ## numeric (int or float; float covers JSON round-trip coercion), and
 ## unlocked_events/unlocked_cars must each be present as an Array holding
-## only non-empty Strings (empty arrays are valid defaults). Settings must
+## only non-empty String/StringName entries (empty arrays are valid defaults). Settings must
 ## hold exactly the five default_data() keys with the three volumes numeric
 ## within VOLUME_MIN/VOLUME_MAX and assists/camera_shake strictly bool;
 ## unknown settings keys are rejected (lenient dropping still lives in
@@ -121,9 +123,9 @@ static func validate(data: Dictionary) -> bool:
 	var progress: Variant = data.get("progress")
 	if not (progress is Dictionary):
 		return false
-	if not ((progress as Dictionary).get("selected_car") is String):
+	if not ((progress as Dictionary).get("selected_car") is String or (progress as Dictionary).get("selected_car") is StringName):
 		return false
-	if not ((progress as Dictionary).get("current_event") is String):
+	if not ((progress as Dictionary).get("current_event") is String or (progress as Dictionary).get("current_event") is StringName):
 		return false
 	var color: Variant = (progress as Dictionary).get("selected_color")
 	if not (color is int or color is float):
@@ -133,9 +135,9 @@ static func validate(data: Dictionary) -> bool:
 		if not (unlocks is Array):
 			return false
 		for entry: Variant in (unlocks as Array):
-			if not (entry is String):
+			if not (entry is String or entry is StringName):
 				return false
-			if (entry as String).is_empty():
+			if str(entry).is_empty():
 				return false
 	return true
 
