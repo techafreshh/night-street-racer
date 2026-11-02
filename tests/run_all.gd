@@ -125,6 +125,8 @@ func _run_all() -> void:
 		"test_pause_toggle_freezes_tree",
 		"test_race_scene_boots",
 		"test_event_to_garage_flow",
+		"test_menu_esc_never_quits",
+		"test_garage_esc_goes_back",
 	]
 	for t: String in tests:
 		await _run_test(t)
@@ -4076,4 +4078,122 @@ func test_event_to_garage_flow() -> bool:
 	await process_frame
 	gs.set("current_event", prev)
 	await process_frame
+	return true
+
+func test_menu_esc_never_quits() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/menu.gd")
+	check(src != "", "menu.gd source loads for the Esc probe")
+	var start := src.find("func _unhandled_input")
+	check(start >= 0, "menu.gd keeps an _unhandled_input handler")
+	var body := ""
+	if start >= 0:
+		var rest := src.substr(start)
+		var next := rest.find("\nfunc ", 1)
+		body = rest.substr(0, next) if next >= 0 else rest
+	check(not body.contains("quit"), "menu Esc path never quits")
+	check(body.contains("_on_back"), "event-select Esc routes through _on_back")
+	check(body.contains("menu_mode"), "main-menu Esc stays mode-aware")
+	check(src.contains("func _on_quit"), "QuitButton keeps its _on_quit path")
+	check(src.contains("tree.quit()"), "explicit QuitButton quit path survives")
+	var tscn := FileAccess.get_file_as_string("res://scenes/ui/main_menu.tscn")
+	check(tscn != "", "main_menu.tscn source loads for the Hint probe")
+	check(not tscn.contains("Press Esc to quit"), "stale Esc-to-quit Hint is gone")
+	check(tscn.contains("InfoLabel"), "InfoLabel survives the Hint removal")
+	var main_packed = load("res://scenes/ui/main_menu.tscn")
+	check(main_packed is PackedScene, "main_menu.tscn loads as PackedScene for the Esc probe")
+	if not (main_packed is PackedScene):
+		return true
+	var main_inst: Node = main_packed.instantiate()
+	check(main_inst != null, "main menu instantiates for the Esc probe")
+	if main_inst == null:
+		return true
+	root.add_child(main_inst)
+	await process_frame
+	await process_frame
+	var before := current_scene
+	for action_name in [&"pause", &"ui_cancel"]:
+		var ev := InputEventAction.new()
+		ev.action = action_name
+		ev.pressed = true
+		main_inst.call("_unhandled_input", ev)
+		await process_frame
+		await process_frame
+	check(is_instance_valid(main_inst), "main-menu Esc keeps the instance alive")
+	check(main_inst.get_parent() == root, "main-menu Esc keeps the instance in the tree")
+	check(current_scene == before, "main-menu Esc triggers no navigation")
+	root.remove_child(main_inst)
+	main_inst.free()
+	await process_frame
+	for action_name in [&"pause", &"ui_cancel"]:
+		var sel_packed = load("res://scenes/ui/event_select.tscn")
+		check(sel_packed is PackedScene, "event_select.tscn loads as PackedScene for the Esc probe")
+		if not (sel_packed is PackedScene):
+			continue
+		var sel_inst: Node = sel_packed.instantiate()
+		root.add_child(sel_inst)
+		await process_frame
+		await process_frame
+		var sel_ev := InputEventAction.new()
+		sel_ev.action = action_name
+		sel_ev.pressed = true
+		sel_inst.call("_unhandled_input", sel_ev)
+		await process_frame
+		await process_frame
+		var swapped := current_scene
+		check(swapped != null and swapped != sel_inst, "event-select %s leaves EventSelect" % String(action_name))
+		check(swapped != null and swapped.find_child("RaceButton", true, false) != null, "event-select %s navigates home to a scene holding RaceButton" % String(action_name))
+		if swapped != null and swapped != sel_inst and is_instance_valid(swapped):
+			if swapped.get_parent() == root:
+				root.remove_child(swapped)
+			swapped.free()
+			await process_frame
+		if is_instance_valid(sel_inst):
+			if sel_inst.get_parent() == root:
+				root.remove_child(sel_inst)
+			sel_inst.free()
+			await process_frame
+	return true
+
+func test_garage_esc_goes_back() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/ui/garage.gd")
+	check(src != "", "garage.gd source loads for the Esc probe")
+	var start := src.find("func _unhandled_input")
+	check(start >= 0, "garage.gd keeps an _unhandled_input handler")
+	var body := ""
+	if start >= 0:
+		var rest := src.substr(start)
+		var next := rest.find("\nfunc ", 1)
+		body = rest.substr(0, next) if next >= 0 else rest
+	check(not body.contains("quit"), "garage Esc path never quits")
+	check(body.contains("_on_back"), "garage Esc routes through _on_back")
+	check(src.contains("main_menu.tscn"), "garage Esc target stays main_menu.tscn")
+	for action_name in [&"pause", &"ui_cancel"]:
+		var packed = load("res://scenes/ui/garage.tscn")
+		check(packed is PackedScene, "garage.tscn loads as PackedScene for the Esc probe")
+		if not (packed is PackedScene):
+			continue
+		var instance: Node = packed.instantiate()
+		root.add_child(instance)
+		await process_frame
+		await process_frame
+		var ev := InputEventAction.new()
+		ev.action = action_name
+		ev.pressed = true
+		instance.call("_unhandled_input", ev)
+		await process_frame
+		await process_frame
+		var swapped := current_scene
+		check(swapped != null and swapped != instance, "garage %s leaves Garage" % String(action_name))
+		check(swapped != null and swapped.find_child("RaceButton", true, false) != null, "garage %s navigates home to a scene holding RaceButton" % String(action_name))
+		if swapped != null and swapped != instance and is_instance_valid(swapped):
+			if swapped.get_parent() == root:
+				root.remove_child(swapped)
+			swapped.free()
+			await process_frame
+		if is_instance_valid(instance):
+			if instance.get_parent() == root:
+				root.remove_child(instance)
+			instance.free()
+			await process_frame
+	check(SaveSystem.save_game(SaveSystem.default_data()), "garage Esc probe restores defaults")
 	return true
