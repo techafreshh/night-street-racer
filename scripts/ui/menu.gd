@@ -68,7 +68,9 @@ func _wire_main_mode() -> void:
 		race.grab_focus()
 
 
-func _wire_select_mode() -> void:
+## Wires the event-select BackButton to _on_back plus initial focus on the
+## first unlocked Event_* button (fallback BackButton); not a run-mode/mode-toggle hook.
+func _wire_event_select() -> void:
 	var back := _btn("BackButton")
 	if back != null:
 		back.pressed.connect(_on_back)
@@ -175,7 +177,7 @@ func _build_event_grid_async() -> void:
 		_add_event_button(grid, ev, Progression.is_unlocked_with(ev, unlocked), float(bests.get(ev.route_id, -1.0)))
 	if not is_instance_valid(grid) or grid.is_queued_for_deletion():
 		return
-	_wire_select_mode()
+	_wire_event_select()
 	print("EVENT_GRID_READY")
 
 
