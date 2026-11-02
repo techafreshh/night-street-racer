@@ -138,7 +138,8 @@ static func save_game(data: Dictionary) -> bool:
 ## to default_data(); valid documents merge leniently over the defaults so
 ## unknown future versions (and partial files) still apply their known keys.
 ## The settings overlay is allow-listed to the default_data() settings keys;
-## unknown settings keys are discarded.
+## unknown settings keys are discarded. The progress overlay is allow-listed
+## to the default_data() progress keys; unknown progress keys are discarded.
 ## Unknown top-level keys carry through verbatim for forward-compat (known
 ## keys still merge over defaults; version stamp behavior unchanged).
 ## Records merge per-entry onto the default empty table: each raw entry is
@@ -173,7 +174,8 @@ static func load_game() -> Dictionary:
 		var progress: Dictionary = merged["progress"]
 		var saved_progress: Dictionary = raw["progress"]
 		for key: Variant in saved_progress.keys():
-			progress[key] = saved_progress[key]
+			if progress.has(key):
+				progress[key] = saved_progress[key]
 	if raw.get("records") is Dictionary:
 		var merged_records: Dictionary = merged["records"]
 		var saved_records: Dictionary = raw["records"]
