@@ -2,16 +2,16 @@ class_name RaceEvent
 extends Resource
 ## Data-driven race event: route_id, type, laps, opponents, unlock_req, reward.
 ## Single source of truth for one race: the directed checkpoint list plus the
-## sprint-vs-circuit encoding (laps) so adding a route later needs a new
+## sprint/circuit/drift encoding (laps) so adding a route later needs a new
 ## .tres, not new code. Contract fields: route_id, type, laps, opponents,
-## unlock_req, reward. The export is named `event_type` (SPRINT/CIRCUIT);
+## unlock_req, reward. The export is named `event_type` (SPRINT/CIRCUIT/DRIFT);
 ## `type` above names the same slot for file scans.
 ## Order math is pure-static (no scene) so headless tests call it directly:
 ## next_index() walks gates from the -1 start sentinel, wrapping to 0 on
 ## circuits and returning -1 when a sprint is finished; is_wrong_way() flags
 ## only in-range hits that are neither the expected gate nor a duplicate.
 
-enum EventType { SPRINT, CIRCUIT }
+enum EventType { SPRINT, CIRCUIT, DRIFT }
 
 const CHECKPOINT_COUNT_MIN := 4
 const CHECKPOINT_RADIUS_MIN := 6.0
@@ -29,7 +29,9 @@ const MODE_TIME_TRIAL := &"time_trial"
 
 ## Unique event handle; matches the asset filename stem (e.g. harbor_sprint).
 @export var route_id := ""
-## Event type: SPRINT (point-to-point, 1 lap) or CIRCUIT (loop, 2+ laps).
+## Event type: SPRINT (point-to-point, 1 lap), CIRCUIT (loop, 2+ laps), or
+## DRIFT (single judged run, sprint-like order math: 1 lap, final gate ends
+## the run; slide scoring itself lives in DriftScoring, not in this type).
 @export var event_type: EventType = EventType.SPRINT
 ## Fun range: 1 lap for sprints, 2 - 5 laps for circuits.
 @export var laps := 1
@@ -52,7 +54,7 @@ static func validate(event: RaceEvent) -> bool:
 		return false
 	if event.route_id == "":
 		return false
-	if event.event_type == EventType.SPRINT:
+	if event.event_type == EventType.SPRINT or event.event_type == EventType.DRIFT:
 		if event.laps != SPRINT_LAPS:
 			return false
 	elif event.laps < CIRCUIT_LAPS_MIN or event.laps > CIRCUIT_LAPS_MAX:
@@ -83,13 +85,18 @@ static func is_sprint(event: RaceEvent) -> bool:
 	return event != null and event.event_type == EventType.SPRINT
 
 
+## True for the judged drift run (sprint-like: 1 lap, final gate finishes).
+static func is_drift(event: RaceEvent) -> bool:
+	return event != null and event.event_type == EventType.DRIFT
+
+
 ## True when the event is flagged as a solo time-trial run.
 static func is_time_trial(event: RaceEvent) -> bool:
 	return event != null and event.mode == MODE_TIME_TRIAL
 
 
 ## Expected next gate after `last_index` (-1 is the race-start sentinel):
-## 0 at start, wraps to 0 on circuits, -1 when a sprint is finished.
+## 0 at start, wraps to 0 on circuits, -1 when a sprint/drift run is finished.
 static func next_index(last_index: int, event: RaceEvent) -> int:
 	if event == null:
 		return -1

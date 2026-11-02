@@ -5,7 +5,7 @@
 [resource]
 script = ExtResource("1")
 route_id = "drift_park"
-event_type = 0
+event_type = 2
 laps = 1
 opponents = 3
 unlock_req = &"alley_sprint"

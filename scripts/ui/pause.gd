@@ -23,6 +23,9 @@ func _ready() -> void:
 	var restart := _btn("RestartButton")
 	if restart != null:
 		restart.pressed.connect(_on_restart)
+	var settings := _btn("SettingsButton")
+	if settings != null:
+		settings.pressed.connect(_on_settings)
 	var quit_btn := _btn("QuitButton")
 	if quit_btn != null:
 		quit_btn.pressed.connect(_on_quit)
@@ -109,6 +112,20 @@ func _on_quit() -> void:
 	if tree == null:
 		return
 	tree.change_scene_to_file("res://scenes/ui/main_menu.tscn")
+
+
+## Route to settings mid-race: unpause first (same idiom as _on_quit),
+## then change scene so the settings screen boots unpaused.
+func _on_settings() -> void:
+	_play_click()
+	_paused = false
+	var tree := get_tree()
+	if tree != null:
+		tree.paused = false
+	visible = false
+	if tree == null:
+		return
+	tree.change_scene_to_file("res://scenes/ui/settings.tscn")
 
 
 ## Guarded UI click: no-op headless or when the mixer is absent.

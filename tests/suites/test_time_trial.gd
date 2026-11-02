@@ -18,7 +18,8 @@ func get_test_names() -> Array[String]:
 		"timetrial_mode_field_present",
 		"timetrial_hud_delta_formats",
 		"timetrial_race_to_results_keeps_banner",
-		"timetrial_single_mode_predicate",
+	"timetrial_single_mode_predicate",
+		"timetrial_best_roundtrip_every_route",
 	]
 	return names
 
@@ -44,7 +45,7 @@ func timetrial_saves_best_only_when_faster() -> bool:
 	return true
 
 func timetrial_mode_field_present() -> bool:
-	var stems: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint"]
+	var stems: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint", "drift_park"]
 	for stem in stems:
 		var text := FileAccess.get_file_as_string("res://assets/events/%s.tres" % stem)
 		ctx.check(text != "", "%s.tres reads for the mode scan" % stem)
@@ -279,4 +280,25 @@ func timetrial_single_mode_predicate() -> bool:
 		ctx.tree.root.remove_child(gs)
 		gs.free()
 		await ctx.tree.process_frame
+	return true
+
+func timetrial_best_roundtrip_every_route() -> bool:
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "per-route TT probe starts from defaults")
+	var stems: Array[String] = ["harbor_sprint", "downtown_gp", "neon_loop", "bayline_circuit", "alley_sprint", "drift_park"]
+	for i in stems.size():
+		var stem: String = stems[i]
+		var seed := 80.0 + float(i)
+		ctx.check(TimeTrial.get_best(stem) < 0.0, "no TT best stored for fresh %s" % stem)
+		ctx.check(TimeTrial.save_best_if_faster(stem, seed), "first TT time seeds %s" % stem)
+		ctx.check(absf(TimeTrial.get_best(stem) - seed) < 0.001, "seeded TT best reads back on %s" % stem)
+		ctx.check(not TimeTrial.save_best_if_faster(stem, seed + 5.0), "slower TT time never overwrites %s" % stem)
+		ctx.check(TimeTrial.save_best_if_faster(stem, seed - 1.0), "faster TT time overwrites %s" % stem)
+		ctx.check(absf(TimeTrial.get_best(stem) - (seed - 1.0)) < 0.001, "%s keeps the faster time" % stem)
+	var loaded := SaveSystem.load_game()
+	var records: Dictionary = loaded["records"]
+	for stem in stems:
+		ctx.check(records.has(stem), "records persist a %s entry" % stem)
+		if records.has(stem):
+			ctx.check(float((records[stem] as Dictionary).get("best_time_s", 0.0)) > 0.0, "%s persists a positive best" % stem)
+	ctx.check(SaveSystem.save_game(SaveSystem.default_data()), "per-route TT probe restores defaults")
 	return true

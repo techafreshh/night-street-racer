@@ -70,12 +70,19 @@ func _wire_main_mode() -> void:
 		race.grab_focus()
 
 
-## Wires the event-select BackButton to _on_back plus initial focus on the
-## first unlocked Event_* button (fallback BackButton); not a run-mode/mode-toggle hook.
+## Wires the event-select BackButton to _on_back, the ModeButton to the
+## race/time-trial run-mode toggle, plus initial focus on the first unlocked
+## Event_* button (fallback BackButton). The toggle defaults to race on every
+## entry and only touches the memory-only GameState current_mode selector.
 func _wire_event_select() -> void:
 	var back := _btn("BackButton")
 	if back != null:
 		back.pressed.connect(_on_back)
+	_reset_mode_to_race()
+	_refresh_mode_ui()
+	var mode := _btn("ModeButton")
+	if mode != null:
+		mode.pressed.connect(_on_mode_toggle)
 	# Focus the first playable event so keyboard/gamepad can start at once.
 	var grid := find_child("EventGrid", true, false)
 	if grid != null:
@@ -86,6 +93,44 @@ func _wire_event_select() -> void:
 				return
 	if back != null:
 		back.grab_focus()
+
+
+## Default the run-mode toggle to race every time event select builds, via
+## the guarded GameState typed writer; memory-only, never persisted.
+func _reset_mode_to_race() -> void:
+	var gs = get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("select_mode"):
+		gs.call("select_mode", "race")
+
+
+## Reflect the memory-only run mode on the ModeButton + InfoLabel so the
+## player sees rivals+traffic (race) vs solo best-chasing (time trial).
+func _refresh_mode_ui() -> void:
+	var time_trial := false
+	var gs = get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("is_time_trial_mode"):
+		time_trial = bool(gs.call("is_time_trial_mode"))
+	var mode := _btn("ModeButton")
+	if mode != null:
+		(mode as Button).text = "Mode: Time Trial" if time_trial else "Mode: Race"
+	var info := _info()
+	if info != null:
+		if time_trial:
+			info.text = "Time Trial: solo run, chase your best"
+		else:
+			info.text = "Race: rivals + traffic"
+
+
+## Flip the memory-only run-mode selector and mirror it on the button/label.
+func _on_mode_toggle() -> void:
+	_play_click()
+	var gs = get_node_or_null("/root/GameState")
+	if gs != null and gs.has_method("is_time_trial_mode") and gs.has_method("select_mode"):
+		if bool(gs.call("is_time_trial_mode")):
+			gs.call("select_mode", "race")
+		else:
+			gs.call("select_mode", "time_trial")
+	_refresh_mode_ui()
 
 
 func _on_race() -> void:
@@ -217,14 +262,18 @@ func _build_event_grid() -> void:
 
 
 ## Spawn one Button for ev: "Event_<route_id>", disabled and focus-skipped
-## when locked, wired to _on_event_chosen when open. Pure button builder
-## (issue #168): lock state and best arrive precomputed from the grid
-## builder's single save snapshot, so this function performs no disk I/O.
+## when locked, wired to _on_event_chosen when open. Drift runs carry a
+## DRIFT tag; unlocked rows with a stored best carry its BEST tag. Pure
+## button builder (issue #168): lock state and best arrive precomputed from
+## the grid builder's single save snapshot, so this function performs no
+## disk I/O.
 func _add_event_button(grid: GridContainer, ev: RaceEvent, unlocked: bool, best: float) -> void:
 	var btn := Button.new()
 	btn.name = "Event_%s" % ev.route_id
 	btn.custom_minimum_size = Vector2(320, 48)
 	btn.text = "%s (%d laps, %d rivals)" % [ev.route_id, ev.laps, ev.opponents]
+	if RaceEvent.is_drift(ev):
+		btn.text += "  DRIFT"
 	if best > 0.0:
 		btn.text += "  BEST %s" % TimeTrial.format_time(best)
 	if unlocked:
