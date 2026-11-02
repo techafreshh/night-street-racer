@@ -52,24 +52,32 @@ func _build_ground() -> void:
 	add_child(ground)
 
 
-## Event handle from GameState, defaulting to harbor_sprint when empty.
+## Event handle from GameState (typed GameState.get_current_event()),
+## defaulting to harbor_sprint when empty.
 func _resolve_event_id() -> void:
 	var gs := get_node_or_null("/root/GameState")
-	if gs != null:
-		var current := StringName(gs.get("current_event"))
-		if current != &"":
-			_event_id = String(current)
+	if gs == null:
+		return
+	if not gs.has_method("get_current_event"):
+		return
+	var current := StringName(gs.call("get_current_event"))
+	if current != &"":
+		_event_id = String(current)
 
 
-## Car handle from GameState, defaulting to DEFAULT_CAR when empty,
+## Car handle from GameState (typed GameState.get_selected_car() /
+## GameState.get_default_car()), defaulting to DEFAULT_CAR when empty,
 ## mirroring menu.gd _on_garage's fill-default behavior.
 func _resolve_car_id() -> String:
 	var gs := get_node_or_null("/root/GameState")
-	if gs != null:
-		var picked := StringName(gs.get("selected_car"))
+	if gs == null:
+		return FALLBACK_CAR
+	if gs.has_method("get_selected_car"):
+		var picked := StringName(gs.call("get_selected_car"))
 		if picked != &"":
 			return String(picked)
-		var fallback := StringName(gs.get("DEFAULT_CAR"))
+	if gs.has_method("get_default_car"):
+		var fallback := StringName(gs.call("get_default_car"))
 		if fallback != &"":
 			return String(fallback)
 	return FALLBACK_CAR

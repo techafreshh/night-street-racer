@@ -95,6 +95,21 @@ func select_event(route_id: String) -> void:
 	current_event = StringName(route_id)
 
 
+## Typed reader: return the chosen event handle (empty when none selected).
+func get_current_event() -> StringName:
+	return current_event
+
+
+## Typed reader: return the chosen car handle (empty when none selected).
+func get_selected_car() -> StringName:
+	return selected_car
+
+
+## Typed reader: return the canonical default car handle.
+func get_default_car() -> StringName:
+	return DEFAULT_CAR
+
+
 ## Allow-list guard for the run-mode selector (same allow-list as
 ## RaceEvent.validate()): true only for RaceEvent.MODE_RACE and
 ## RaceEvent.MODE_TIME_TRIAL.
