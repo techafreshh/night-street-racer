@@ -16,6 +16,11 @@ extends Node
 ## the car_sedan.tscn tune); used to fill selected_car when empty.
 const DEFAULT_CAR: StringName = &"sedan"
 
+## Canonical run-mode handles (mirrors RaceEvent.MODE_RACE / MODE_TIME_TRIAL);
+## the closed allow-list for select_mode().
+const MODE_RACE: StringName = &"race"
+const MODE_TIME_TRIAL: StringName = &"time_trial"
+
 ## True while bulk-loading from disk so the setters skip write-back.
 var _loading := false
 ## True while a coalesced write-back is scheduled but not yet flushed.
@@ -76,9 +81,26 @@ func select_event(route_id: String) -> void:
 	current_event = StringName(route_id)
 
 
+## Allow-list guard for the run-mode selector (mirrors the
+## RaceEvent.validate() mode-check shape): true only for the two
+## canonical handles.
+static func is_valid_mode(m: StringName) -> bool:
+	return m == MODE_RACE or m == MODE_TIME_TRIAL
+
+
+## True when the in-memory run mode names the solo time-trial mode.
+func is_time_trial_mode() -> bool:
+	return current_mode == MODE_TIME_TRIAL
+
+
 ## Typed writer: record the run mode (race or time_trial) in memory only.
+## Unknown values (bogus, empty, wrong case, whitespace) are ignored:
+## the last valid mode is kept with no persist side effect.
 func select_mode(m: String) -> void:
-	current_mode = StringName(m)
+	var mode := StringName(m)
+	if not is_valid_mode(mode):
+		return
+	current_mode = mode
 
 
 ## Typed writer: record the chosen car and persist it.
