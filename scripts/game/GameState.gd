@@ -69,7 +69,22 @@ var unlocked_cars: Array = []
 
 ## Runtime-only run-mode selector (&"race" / &"time_trial"): never
 ## persisted to user://save.json, so _persist/reload leave it untouched.
-var current_mode: StringName = &"race"
+## Direct assignment is guarded: only the two canonical handles stick,
+## anything else is ignored with no persist side effect.
+## Untyped so non-String/StringName writes reach the setter and are
+## ignored instead of erroring on a typed-var assignment.
+var current_mode = &"race":
+	set(value):
+		if not (value is String or value is StringName):
+			return
+		var mode := StringName(value)
+		if not is_valid_mode(mode):
+			return
+		if current_mode == mode:
+			return
+		current_mode = mode
+	get:
+		return current_mode
 
 
 func _ready() -> void:
@@ -94,13 +109,11 @@ func is_time_trial_mode() -> bool:
 
 
 ## Typed writer: record the run mode (race or time_trial) in memory only.
-## Unknown values (bogus, empty, wrong case, whitespace) are ignored:
-## the last valid mode is kept with no persist side effect.
+## Funnels through the guarded current_mode setter, so unknown values
+## (bogus, empty, wrong case, whitespace) are ignored: the last valid
+## mode is kept with no persist side effect.
 func select_mode(m: String) -> void:
-	var mode := StringName(m)
-	if not is_valid_mode(mode):
-		return
-	current_mode = mode
+	current_mode = StringName(m)
 
 
 ## Typed writer: record the chosen car and persist it.
