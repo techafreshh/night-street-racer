@@ -115,6 +115,7 @@ func _run_all() -> void:
 		"hud_subscribes_to_race_signals",
 		"progression_string_list_drops_empty",
 		"test_progression_drops_empty_unlock_strings",
+		"test_save_system_sanitizes_unlock_lists",
 		"top3_unlocks_next_event",
 		"win_unlocks_car",
 	]
@@ -586,6 +587,39 @@ func test_save_system_records_per_entry_merge() -> bool:
 		check(float(reloaded_entry.get("best_time_s", 0.0)) == 93.24, "re-saved entry keeps best_time_s")
 		check(int(reloaded_entry.get("best_position", 0)) == 1, "re-saved entry keeps best_position")
 	check(SaveSystem.save_game(SaveSystem.default_data()), "records per-entry probe restores defaults")
+	return true
+
+func test_save_system_sanitizes_unlock_lists() -> bool:
+	var defaults := SaveSystem.default_data()
+	var raw := {
+		"version": SaveSystem.SAVE_VERSION,
+		"settings": (defaults["settings"] as Dictionary).duplicate(true),
+		"progress": (defaults["progress"] as Dictionary).duplicate(true),
+		"records": {},
+	}
+	(raw["progress"] as Dictionary)["unlocked_events"] = ["harbor_sprint", "", 42, {"event": true}, null, "downtown_gp"]
+	(raw["progress"] as Dictionary)["unlocked_cars"] = "coupe"
+	var probe := FileAccess.open(SaveSystem.SAVE_PATH, FileAccess.WRITE)
+	check(probe != null, "save path opens for the dirty unlock probe")
+	if probe != null:
+		probe.store_string(JSON.stringify(raw))
+		probe.close()
+	var loaded := SaveSystem.load_game()
+	var events: Array = (loaded["progress"] as Dictionary).get("unlocked_events", [])
+	var cars: Array = (loaded["progress"] as Dictionary).get("unlocked_cars", [])
+	check(events == ["harbor_sprint", "downtown_gp"], "dirty unlock events load back cleaned in order")
+	check(not events.has(""), "empty unlock entry is dropped on load")
+	check(not events.has(42), "non-String unlock entry is dropped on load")
+	check(cars == [], "non-Array unlock value loads as empty")
+	check(SaveSystem.validate(loaded), "dirty unlocks load back valid")
+	check(SaveSystem.save_game(loaded), "save_game rewrites the doc after unlock sanitization")
+	var reloaded := SaveSystem.load_game()
+	var reloaded_events: Array = (reloaded["progress"] as Dictionary).get("unlocked_events", [])
+	var reloaded_cars: Array = (reloaded["progress"] as Dictionary).get("unlocked_cars", [])
+	check(SaveSystem.validate(reloaded), "reloaded doc with cleaned unlocks still validates")
+	check(reloaded_events == ["harbor_sprint", "downtown_gp"], "cleaned unlock events survive load-save-load")
+	check(reloaded_cars == [], "cleaned non-Array unlock stays empty after load-save-load")
+	check(SaveSystem.save_game(SaveSystem.default_data()), "dirty unlock probe restores defaults")
 	return true
 
 func test_save_system_drops_unknown_settings_keys() -> bool:
