@@ -1,8 +1,9 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://scripts/vehicles/vehicle_controller.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/vehicles/chase_camera.gd" id="2"]
 [ext_resource type="Script" path="res://scripts/vehicles/assists.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/fx/vehicle_fx.gd" id="9"]
 [ext_resource type="Resource" path="res://assets/cars/tunes/default_tune.tres" id="4"]
 [ext_resource type="Script" path="res://scripts/vehicles/car_paint.gd" id="5"]
 [ext_resource type="AudioStream" path="res://assets/audio/engine.wav" id="6"]
@@ -103,6 +104,9 @@ script = ExtResource("2")
 
 [node name="Assists" type="Node" parent="."]
 script = ExtResource("3")
+
+[node name="VehicleFX" type="Node" parent="."]
+script = ExtResource("9")
 
 [node name="CarPaint" type="Node" parent="."]
 script = ExtResource("5")

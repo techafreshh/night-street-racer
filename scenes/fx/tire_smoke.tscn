@@ -1,0 +1,35 @@
+[gd_scene load_steps=4 format=3]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_smoke"]
+transparency = 1
+billboard_mode = 1
+shading_mode = 0
+vertex_color_use_as_albedo = true
+albedo_color = Color(0.55, 0.55, 0.58, 0.45)
+
+[sub_resource type="QuadMesh" id="QuadMesh_smoke"]
+material = SubResource("StandardMaterial3D_smoke")
+size = Vector2(0.6, 0.6)
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_smoke"]
+emission_shape = 1
+emission_sphere_radius = 0.25
+direction = Vector3(0, 1, 0)
+spread = 35.0
+gravity = Vector3(0, 1.2, 0)
+initial_velocity_min = 0.8
+initial_velocity_max = 2.0
+damping_min = 0.5
+damping_max = 1.5
+scale_min = 0.4
+scale_max = 1.0
+color = Color(0.6, 0.6, 0.62, 0.5)
+
+[node name="TireSmoke" type="GPUParticles3D"]
+emitting = false
+amount = 24
+lifetime = 0.8
+local_coords = false
+visibility_aabb = AABB(-4, -1, -4, 8, 5, 8)
+process_material = SubResource("ParticleProcessMaterial_smoke")
+draw_pass_1 = SubResource("QuadMesh_smoke")
