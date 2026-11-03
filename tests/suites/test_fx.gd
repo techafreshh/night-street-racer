@@ -32,6 +32,9 @@ func get_test_names() -> Array[String]:
 		"test_parked_silent",
 		"test_force_slip_path",
 		"test_shake_respect",
+		"test_skid_exit_clean",
+		"test_pool_exit_clean",
+		"test_vehicle_fx_exit_clean",
 	]
 	return names
 
@@ -211,6 +214,58 @@ func test_force_slip_path() -> bool:
 	await ctx._despawn_car()
 	return true
 
+
+func test_skid_exit_clean() -> bool:
+	var cls := load("res://scripts/fx/skid_marks.gd") as GDScript
+	ctx.check(cls != null, "skid_marks.gd loads as GDScript")
+	if cls == null:
+		return true
+	var trail := cls.new() as Node3D
+	ctx.check(trail != null, "SkidMarks instantiates freestanding")
+	if trail == null:
+		return true
+	ctx.tree.root.add_child(trail)
+	for i in 5:
+		var p := Vector3(float(i) * 0.5, 0.03, 0.0)
+		trail.call("add_segment", p + Vector3(-0.8, 0, 0), p + Vector3(0.8, 0, 0))
+	ctx.check(int(trail.call("segment_count")) == 5, "trail holds 5 rungs before exit")
+	ctx.tree.root.remove_child(trail)
+	ctx.check(int(trail.call("segment_count")) == 0, "tree exit empties the trail (got %d)" % int(trail.call("segment_count")))
+	trail.free()
+	var src := FileAccess.get_file_as_string("res://scripts/fx/skid_marks.gd")
+	ctx.check(src.contains("_exit_tree"), "skid_marks.gd cleans up in _exit_tree")
+	return true
+
+func test_pool_exit_clean() -> bool:
+	var cls := load("res://scripts/fx/fx_pool.gd") as GDScript
+	ctx.check(cls != null, "fx_pool.gd loads as GDScript")
+	if cls == null:
+		return true
+	var pool := cls.new() as Node3D
+	ctx.check(pool != null, "FXPool instantiates freestanding")
+	if pool == null:
+		return true
+	ctx.tree.root.add_child(pool)
+	pool.call("burst", Vector3.ZERO)
+	ctx.check(int(pool.call("active_count")) > 0, "burst fires an emitter")
+	ctx.tree.root.remove_child(pool)
+	ctx.check(int(pool.call("active_count")) == 0, "tree exit stops every emitter")
+	ctx.tree.root.add_child(pool)
+	pool.call("burst", Vector3.ZERO)
+	ctx.check(int(pool.call("active_count")) > 0, "burst still works after re-add")
+	ctx.tree.root.remove_child(pool)
+	pool.free()
+	var src := FileAccess.get_file_as_string("res://scripts/fx/fx_pool.gd")
+	ctx.check(src.contains("_exit_tree"), "fx_pool.gd cleans up in _exit_tree")
+	return true
+
+func test_vehicle_fx_exit_clean() -> bool:
+	var src := FileAccess.get_file_as_string("res://scripts/fx/vehicle_fx.gd")
+	ctx.check(src.contains("_exit_tree"), "vehicle_fx.gd cleans up in _exit_tree")
+	for token in ["EngineAudio", "SkidAudio", "WindAudio"]:
+		ctx.check(src.contains(token), "vehicle_fx exit releases the %s loop" % token)
+	ctx.check(src.contains("\"stream\", null"), "vehicle_fx exit nulls loop streams")
+	return true
 
 func test_shake_respect() -> bool:
 	var src := FileAccess.get_file_as_string("res://scripts/fx/vehicle_fx.gd")

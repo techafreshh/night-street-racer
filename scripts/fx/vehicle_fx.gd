@@ -248,8 +248,13 @@ func _poll_settings() -> void:
 			break
 
 
-## Stop emitters and empty the trail while siblings are still valid
-## (the car_paint.gd _exit_tree cleanup idiom); the tree frees the rest.
+## Stop emitters, drop loop refs, and release the code-built lamp
+## resources while siblings are still valid (the car_paint.gd _exit_tree
+## cleanup idiom); the tree frees the rest. Stopping the car's
+## EngineAudio/SkidAudio/WindAudio loops here — before the car subtree
+## is freed — releases audible-run playback/stream refs next to the
+## headless play() gate in audio_manager.gd, which is what keeps the
+## Dummy-driver playbacks out of the exit-time resource-cache dump.
 func _exit_tree() -> void:
 	_built = false
 	for puff in _emitters:
@@ -258,5 +263,31 @@ func _exit_tree() -> void:
 	_emitters.clear()
 	if _skids != null and is_instance_valid(_skids):
 		_skids.clear()
+	var car := get_parent()
+	if car != null and is_instance_valid(car):
+		for hook in ["EngineAudio", "SkidAudio", "WindAudio"]:
+			var loop := (car as Node).get_node_or_null(hook)
+			if loop != null and is_instance_valid(loop):
+				# Unconditional stop: the headless Dummy driver reports
+				# playing=false for live loops, so a playing guard would
+				# skip the very loops that leak playback/stream refs.
+				if loop.has_method("stop"):
+					loop.call("stop")
+				if loop.get("stream") != null:
+					loop.set("stream", null)
+		_release_headlamp_quads(car as Node)
 	_headlight = null
 	_brake_mats.clear()
+
+
+## Drop the code-built headlamp quad materials; each _make_quad owns a
+## unique QuadMesh, so nulling is leak-safe and idempotent with tree
+## freeing (mirrors car_paint.gd _clear_overrides).
+func _release_headlamp_quads(car: Node) -> void:
+	for child in car.get_children():
+		var lamp := child as MeshInstance3D
+		if lamp == null or not String(lamp.name).begins_with("Headlamp"):
+			continue
+		var quad := lamp.mesh as QuadMesh
+		if quad != null:
+			quad.material = null

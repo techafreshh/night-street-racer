@@ -74,6 +74,18 @@ func active_count() -> int:
 	return active
 
 
+## Stop every pooled emitter and release the shared spark mesh refs on
+## tree exit (the car_paint.gd _exit_tree cleanup idiom); clearing
+## _emitters lets burst() lazily rebuild via _build() if the pooled
+## node is re-added after exit.
+func _exit_tree() -> void:
+	for puff in _emitters:
+		if is_instance_valid(puff):
+			puff.emitting = false
+			puff.mesh = null
+	_emitters.clear()
+
+
 ## Round-robin advance shared by burst() and tests; pure so it needs no tree.
 static func next_index(cursor: int, count: int) -> int:
 	if count <= 0:

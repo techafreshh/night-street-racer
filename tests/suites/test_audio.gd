@@ -31,6 +31,7 @@ func get_test_names() -> Array[String]:
 		"test_audio_vehicle_hooks",
 		"test_audio_vehicle_readout",
 		"test_audio_credits",
+		"test_audio_exit_clean",
 	]
 	return names
 
@@ -163,6 +164,31 @@ func test_audio_vehicle_readout() -> bool:
 		ctx.check(float(car.get("slip_intensity")) >= 0.0, "live slip readout stays non-negative (got %.3f)" % float(car.get("slip_intensity")))
 	ctx.check(FileAccess.file_exists("res://scripts/game/audio_manager.gd"), "mixer script present for the live check")
 	await ctx._despawn_car()
+	return true
+
+func test_audio_exit_clean() -> bool:
+	var cls := load("res://scripts/game/audio_manager.gd") as GDScript
+	ctx.check(cls != null, "audio_manager.gd loads as GDScript")
+	if cls == null:
+		return true
+	var mixer := cls.new() as Node
+	ctx.check(mixer != null, "AudioManager instantiates freestanding")
+	if mixer == null:
+		return true
+	ctx.tree.root.add_child(mixer)
+	for i in 2:
+		await ctx.tree.process_frame
+	ctx.tree.root.remove_child(mixer)
+	var music := mixer.get("_music_player") as AudioStreamPlayer
+	ctx.check(music == null or not music.playing, "exit stops the music player")
+	ctx.check(music == null or music.stream == null, "exit drops the music stream")
+	var click := mixer.get("_click_player") as AudioStreamPlayer
+	ctx.check(click == null or not click.playing, "exit leaves the click player stopped")
+	ctx.check(click == null or click.stream == null, "exit drops the click stream")
+	ctx.check(mixer.get("_vehicle") == null, "exit drops the followed car")
+	mixer.free()
+	var src := FileAccess.get_file_as_string("res://scripts/game/audio_manager.gd")
+	ctx.check(src.contains("_exit_tree"), "audio_manager.gd cleans up in _exit_tree")
 	return true
 
 func test_audio_credits() -> bool:
