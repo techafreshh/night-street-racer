@@ -65,6 +65,16 @@ func clear() -> void:
 		_mesh.clear_surfaces()
 
 
+## Drop the code-built mesh/material refs on tree exit (the
+## car_paint.gd _exit_tree cleanup idiom); _mesh_instance stays a plain
+## child for normal tree freeing. No behavior change to
+## add_segment/_rebuild, which already guard nulls.
+func _exit_tree() -> void:
+	clear()
+	_mesh = null
+	_material = null
+
+
 func _process(delta: float) -> void:
 	if _ages.is_empty():
 		return

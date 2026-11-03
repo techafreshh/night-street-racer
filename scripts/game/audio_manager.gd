@@ -123,6 +123,11 @@ func _follow_target() -> Node:
 
 ## Keep a 3D loop playing at the given volume, loading its stream on
 ## demand so vehicles spawned before the mixer still sound right.
+## Headless boots skip play(): the Dummy driver leaks every playback
+## past the exit-time resource-cache dump and no teardown-time stop()
+## releases it, so creating no headless playback keeps the exit log
+## clean. Streams, volumes, and pitch still update, so the mix resumes
+## untouched on audible runs.
 func _drive_loop(player: AudioStreamPlayer3D, stream_path: String, volume_db: float) -> void:
 	if player.stream == null and ResourceLoader.exists(stream_path):
 		var loaded := load(stream_path) as AudioStreamWAV
@@ -132,7 +137,7 @@ func _drive_loop(player: AudioStreamPlayer3D, stream_path: String, volume_db: fl
 	if player.stream == null:
 		return
 	player.volume_db = volume_db
-	if not player.playing:
+	if not player.playing and DisplayServer.get_name() != "headless":
 		player.play()
 
 
@@ -154,13 +159,48 @@ func unregister_vehicle(car: Node) -> void:
 		_vehicle = null
 
 
-## UI click one-shot; guarded no-op when the stream is missing headless.
+## Release every runtime audio reference while the tree is still valid
+## (the car_paint.gd _exit_tree cleanup idiom: release while siblings
+## are still valid); autoloads receive _exit_tree on quit, so stop the
+## music/click players plus the followed car's 3D loops here and drop
+## their streams. Belt and braces next to the headless play() gate
+## above, which is what keeps Dummy-driver playbacks out of the
+## exit-time resource-cache dump.
+func _exit_tree() -> void:
+	_stop_and_release(_music_player)
+	_stop_and_release(_click_player)
+	var car := _follow_target()
+	if car != null and is_instance_valid(car):
+		for hook in ["EngineAudio", "SkidAudio", "WindAudio"]:
+			_stop_and_release(car.get_node_or_null(hook))
+	_vehicle = null
+
+
+## Stop a player unconditionally and drop its stream so the resource
+## cache holds no refs at exit. The stop is unconditional because the
+## headless Dummy driver reports playing=false for live loops, so a
+## playing guard would skip players that still hold refs. Takes a
+## plain Node because AudioStreamPlayer and AudioStreamPlayer3D
+## share no player base class; guarded for autoload exit after the
+## main scene is gone.
+static func _stop_and_release(player: Node) -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	if player.has_method("stop"):
+		player.call("stop")
+	if player.get("stream") != null:
+		player.set("stream", null)
+
+
+## UI click one-shot; guarded no-op when the stream is missing, and
+## silent headless (no Dummy-driver playback to leak at exit).
 func play_click() -> void:
 	if _click_player == null or not is_instance_valid(_click_player):
 		return
 	if _click_player.stream == null:
 		return
-	_click_player.play()
+	if DisplayServer.get_name() != "headless":
+		_click_player.play()
 
 
 ## (Re)start the menu music loop at full volume; guarded no-op headless.
@@ -171,7 +211,7 @@ func start_menu_music() -> void:
 	if _music_player.stream == null:
 		return
 	_music_player.volume_db = 0.0
-	if not _music_player.playing:
+	if not _music_player.playing and DisplayServer.get_name() != "headless":
 		_music_player.play()
 
 
@@ -182,7 +222,7 @@ func duck_music_for_race() -> void:
 		return
 	if _music_player.stream == null:
 		return
-	if not _music_player.playing:
+	if not _music_player.playing and DisplayServer.get_name() != "headless":
 		_music_player.play()
 	_music_player.volume_db = DUCK_DB
 
