@@ -2,7 +2,7 @@ class_name PauseMenu
 extends CanvasLayer
 ## Standalone pause overlay for race scenes: toggles get_tree().paused on
 ## the shared pause/ui_cancel action, prints PAUSED/RESUMED so headless
-## boots can gate on it, and offers Resume/Restart/Quit. Runs with
+## boots can gate on it, and offers Resume/Restart/Settings/Quit. Runs with
 ## PROCESS_MODE_ALWAYS (set both in the .tscn and in _ready) so input and
 ## button callbacks still fire while the tree is paused; everything else
 ## keeps INHERIT so physics and clocks freeze. Safe to boot alone: every
