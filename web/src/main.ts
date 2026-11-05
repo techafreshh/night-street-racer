@@ -16,6 +16,7 @@ import {
   type VehicleInputs,
   type VehicleState,
 } from "./vehicles/vehicle";
+import { input, type PlayerInput } from "./vehicles/input";
 import {
   SAVE_KEY,
   SAVE_VERSION,
@@ -52,6 +53,7 @@ declare global {
     __setPaused: (paused: boolean) => void;
     __raceEmitter: EventEmitter<RaceEvents>;
     __emitter: EventEmitter<RaceEvents>;
+    __input: PlayerInput;
     __nsr: {
       save: {
         SAVE_KEY: string;
@@ -73,6 +75,7 @@ declare global {
       };
       settings: SettingsStore;
       gameState: GameState;
+      input: PlayerInput;
       race: {
         order: typeof order;
         positions: typeof positions;
@@ -286,6 +289,7 @@ function boot(): void {
   window.setPaused = setPaused;
   window.pause = setPaused;
   window.__setPaused = setPaused;
+  window.__input = input;
   // Mirror the Godot autoload _ready reload: lenient-load the v1 save on
   // boot (read-only; writes happen only through setters plus flush()).
   loadSave();
@@ -310,12 +314,21 @@ function boot(): void {
     },
     settings,
     gameState,
+    input,
     race: { order, positions, drift, timetrial },
   };
+  // Real keyboard feeds the shared table through window listeners;
+  // the fixed step below re-polls every tick for gamepad state.
+  input.attach();
   // Physics initializes asynchronously (WASM compile); the loop keeps
   // stepping the menu meanwhile and picks up the car once ready.
   void initDrive();
   loop = start((dt) => {
+    try {
+      input.poll();
+    } catch {
+      // Input must never break the fixed step (no pad, no vehicle).
+    }
     worldTick(dt);
     fixedSteps += 1;
     window.__fixedSteps = fixedSteps;
