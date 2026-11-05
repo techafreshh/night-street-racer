@@ -80,6 +80,7 @@ import {
 } from "./render/renderer";
 import { createFog, loadEnvironment } from "./render/sky";
 import { Traffic, type CarState, type TrafficCar } from "./traffic/traffic";
+import * as hud from "./ui/hud";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
@@ -139,6 +140,7 @@ declare global {
       city: CityNamespace;
       lighting: LightingNamespace;
       loaders: typeof loaders;
+      hud: hud.HudNamespace;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
@@ -551,6 +553,24 @@ export function worldTick(dt: number): void {
       // Probe bodies must never break the fixed step.
     }
   }
+  // HUD sink: pushes the live vehicle + race snapshot into the DOM
+  // overlay. Guarded so HUD faults never break the fixed step, and no
+  // extra render pass or rAF is added.
+  try {
+    const live = vehicle ?? windowNSRVehicle();
+    let sample: hud.HudVehicleSample | null = null;
+    if (live !== null) {
+      try {
+        const state = live.getState();
+        sample = { speedMs: state.speedMs, currentGear: state.currentGear };
+      } catch {
+        sample = null;
+      }
+    }
+    hud.update({ vehicle: sample, race: hudRaceSnapshot() }, dt);
+  } catch {
+    // The HUD must never break the fixed step.
+  }
 }
 
 let vehicle: Vehicle | null = null;
@@ -624,6 +644,112 @@ function publishTraffic(): TrafficNamespace {
 
 // Live chase camera stepped by worldTick (null until boot publishes it).
 let chase: ChaseCamera | null = null;
+
+// Probe-facing HUD namespace: the pure DOM sink plus its formatters, so
+// black-box probes read the same speed/gear/lap/position/clock numbers
+// the tests pin through window.__nsr.hud on the running service.
+function publishHud(): hud.HudNamespace {
+  return {
+    speedKmhFor: hud.speedKmhFor,
+    speed_kmh_for: hud.speed_kmh_for,
+    gearTextFor: hud.gearTextFor,
+    gear_text_for: hud.gear_text_for,
+    positionTextFor: hud.positionTextFor,
+    position_text_for: hud.position_text_for,
+    lapTextFor: hud.lapTextFor,
+    lap_text_for: hud.lap_text_for,
+    formatTime: hud.formatTime,
+    format_time: hud.format_time,
+    formatDelta: hud.formatDelta,
+    format_delta: hud.format_delta,
+    ensureHud: hud.ensureHud,
+    ensure_hud: hud.ensure_hud,
+    setSpeed: hud.setSpeed,
+    set_speed: hud.set_speed,
+    setGear: hud.setGear,
+    set_gear: hud.set_gear,
+    setLapPosition: hud.setLapPosition,
+    set_lap_position: hud.set_lap_position,
+    setRaceTime: hud.setRaceTime,
+    set_race_time: hud.set_race_time,
+    setDelta: hud.setDelta,
+    set_delta: hud.set_delta,
+    clearDelta: hud.clearDelta,
+    clear_delta: hud.clear_delta,
+    showDrift: hud.showDrift,
+    show_drift: hud.show_drift,
+    updateHud: hud.updateHud,
+    update_hud: hud.update_hud,
+    update: hud.update,
+    attachRace: hud.attachRace,
+    attach_race: hud.attach_race,
+    DRIFT_FADE_TIME: hud.DRIFT_FADE_TIME,
+  };
+}
+
+// Attached race holder for the HUD snapshot: the harness may replace
+// window.__nsr.race.manager, so prefer the probe table before the module
+// handle (windowNSRVehicle belt-and-suspenders idiom). Never throws.
+function activeRaceManager(): RaceManager | null {
+  try {
+    if (typeof window !== "undefined") {
+      const probe = (
+        window as unknown as { __nsr?: { race?: { manager?: RaceManager } } }
+      ).__nsr;
+      const injected = probe?.race?.manager;
+      if (injected !== undefined && injected !== null) {
+        return injected;
+      }
+    }
+  } catch {
+    // Fall through to the module handle.
+  }
+  return raceManager;
+}
+
+// Duck-typed race snapshot for the HUD: reads only plain fields inside
+// try/catch and treats anything missing as no attached race (hidden).
+function hudRaceSnapshot(): hud.HudRaceSnapshot | null {
+  try {
+    const manager = activeRaceManager();
+    if (manager === null || manager === undefined) {
+      return null;
+    }
+    const state = manager.state;
+    if (state === "idle") {
+      return null;
+    }
+    if (manager.event === null || manager.event === undefined) {
+      return null;
+    }
+    const field = Array.isArray(manager.positions) && manager.positions.length > 0
+      ? manager.positions
+      : manager.racers.map((_, i) => i);
+    const total = Math.max(1, field.length);
+    const rank = field.indexOf(0);
+    const pos = rank === -1 ? total : rank + 1;
+    const laps = Math.max(1, manager.totalLaps);
+    const lap = Math.min(laps, Math.max(1, manager.currentLap + 1));
+    const holder = manager as unknown as Record<string, unknown>;
+    const bestRaw = holder["best"] ?? holder["bestTime"] ?? holder["best_time"];
+    const best =
+      typeof bestRaw === "number" && Number.isFinite(bestRaw) ? bestRaw : null;
+    const driftRaw = holder["driftTotal"] ?? holder["drift_total"] ?? holder["driftScore"] ?? holder["drift_score"];
+    const driftTotal =
+      typeof driftRaw === "number" && Number.isFinite(driftRaw) ? driftRaw : null;
+    return {
+      pos,
+      total,
+      lap,
+      laps,
+      raceTime: manager.raceTime,
+      best,
+      driftTotal,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // Live Rapier city world behind the probe namespace (null until the
 // async WASM init lands city colliders without blocking menu render).
@@ -941,6 +1067,11 @@ function boot(): void {
   router.register("menu", renderMenu);
   router.register("race", renderRace);
   router.show("menu");
+  try {
+    hud.ensureHud(document);
+  } catch {
+    // The HUD overlay is additive; the menu stays without it.
+  }
   bootEvents.emit("menu", "menu-ready");
   // The menu renders from DOM regardless of WebGL availability so the
   // page is usable even when headless Chromium lacks a GPU.
@@ -1053,6 +1184,7 @@ function boot(): void {
     city,
     lighting: publishLighting(),
     loaders,
+    hud: publishHud(),
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
