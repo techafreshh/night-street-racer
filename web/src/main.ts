@@ -3,7 +3,7 @@ import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events"
 import { start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
 import { getTune } from "./data/tunes";
-import { ensureRapierReady, PhysicsWorld, type Quat, type Vec3 } from "./physics/world";
+import { ensureRapierReady, PhysicsWorld, rotateVecByQuat, type Quat, type Vec3 } from "./physics/world";
 import {
   clampToFrictionCircle,
   computeLateralForce,
@@ -17,6 +17,14 @@ import {
   type VehicleState,
 } from "./vehicles/vehicle";
 import { input, type PlayerInput } from "./vehicles/input";
+import {
+  ChaseCamera,
+  fovForSpeed,
+  lagWeight,
+  shakeOffset,
+  type CameraPose,
+  type CameraSample,
+} from "./vehicles/camera";
 import {
   SAVE_KEY,
   SAVE_VERSION,
@@ -82,11 +90,33 @@ declare global {
         drift: typeof drift;
         timetrial: typeof timetrial;
       };
+      camera: CameraNamespace;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
   }
 }
+
+// Probe-facing chase-camera namespace: the live ChaseCamera plus the pure
+// port helpers (FOV/lag/shake math) so black-box probes can read the same
+// numbers the tests pin, even before WASM/vehicle init.
+export type CameraNamespace = {
+  instance: ChaseCamera;
+  fovForSpeed: typeof fovForSpeed;
+  fov_for_speed: typeof fovForSpeed;
+  lagWeight: typeof lagWeight;
+  lag_weight: typeof lagWeight;
+  shakeOffset: typeof shakeOffset;
+  shake_offset: typeof shakeOffset;
+  update: (dt: number, sample: CameraSample) => CameraPose;
+  getState: () => CameraPose;
+  readonly fov: number;
+  readonly yaw: number;
+  readonly shake: { x: number; y: number };
+  readonly offset: { x: number; y: number };
+  readonly position: Vec3;
+  readonly lookAt: Vec3;
+};
 
 // Probe-facing vehicle namespace: the live Rapier car plus the pure
 // port functions (suspension/tire/gearbox/reset math) so black-box
@@ -187,16 +217,128 @@ function renderRace(ui: HTMLElement): void {
   ui.replaceChildren(race);
 }
 
+// Live vehicle behind the module handle when the harness replaced the
+// `window.__nsr.vehicle` namespace (same instance, belt and suspenders).
+function windowNSRVehicle(): Vehicle | null {
+  try {
+    if (typeof window !== "undefined") {
+      const probe = (
+        window as unknown as { __nsr?: { vehicle?: { instance?: Vehicle } } }
+      ).__nsr;
+      const instance = probe?.vehicle?.instance;
+      if (instance !== undefined && instance !== null) {
+        return instance;
+      }
+    }
+  } catch {
+    // Unavailable: fall back to the module handle.
+  }
+  return null;
+}
+
+// Live look-back flag: the probe table first (the harness may stub it),
+// then the shared input singleton. Never throws.
+function readLookBack(): boolean {
+  try {
+    if (typeof window !== "undefined") {
+      const probe = (
+        window as unknown as {
+          __input?: {
+            lookBack?: unknown;
+            look_back?: unknown;
+            state?: { lookBack?: unknown; look_back?: unknown };
+          };
+        }
+      ).__input;
+      if (probe !== undefined && probe !== null) {
+        const direct = probe.lookBack ?? probe.look_back;
+        if (direct !== undefined) {
+          return direct === true;
+        }
+        const nested = probe.state?.lookBack ?? probe.state?.look_back;
+        if (nested !== undefined) {
+          return nested === true;
+        }
+      }
+    }
+  } catch {
+    // Fall through to the singleton.
+  }
+  try {
+    return input.state.lookBack === true;
+  } catch {
+    return false;
+  }
+}
+
+// Live shake flag, polled every tick and never cached (settings.gd poll
+// idiom): the probe namespace first, then the settings singleton.
+function readShakeEnabled(): boolean {
+  try {
+    if (typeof window !== "undefined") {
+      const probe = (
+        window as unknown as { __nsr?: { settings?: { cameraShake?: unknown } } }
+      ).__nsr;
+      const flag = probe?.settings?.cameraShake;
+      if (typeof flag === "boolean") {
+        return flag;
+      }
+    }
+  } catch {
+    // Fall through to the singleton.
+  }
+  try {
+    return settings.cameraShake !== false;
+  } catch {
+    return true;
+  }
+}
+
 // Synchronous fixed-step world hook: steps the live Rapier car when
-// physics has initialized; a no-op until then (menu still boots
-// without WASM). Driven by the 60 Hz accumulator in `loop`.
+// physics has initialized, then the chase camera from the live sample
+// (position/yaw/speed/slip plus look-back and the polled shake flag).
+// Driven by the 60 Hz accumulator in `loop`.
 export function worldTick(dt: number): void {
   if (vehicle !== null) {
     vehicle.step(dt);
   }
+  if (chase !== null) {
+    const stepDt = Number.isFinite(dt) && dt > 0 ? dt : 1 / 60;
+    let carPos: Vec3 = { x: 0, y: 0, z: 0 };
+    let carYaw = chase.yaw;
+    let speedMs = 0;
+    let slipRad = 0;
+    const live = vehicle ?? windowNSRVehicle();
+    if (live !== null) {
+      try {
+        const state = live.getState();
+        carPos = state.position;
+        speedMs = state.speedMs;
+        slipRad = state.slipIntensity;
+        const quat = live.body.rotation() as Quat;
+        const fwd = rotateVecByQuat({ x: 0, y: 0, z: -1 }, quat);
+        if (Math.hypot(fwd.x, fwd.z) > 1e-6) {
+          carYaw = Math.atan2(-fwd.x, -fwd.z);
+        }
+      } catch {
+        // Keep the last-sample defaults; the camera never breaks stepping.
+      }
+    }
+    chase.update(stepDt, {
+      carPos,
+      carYaw,
+      speedMs,
+      slipRad,
+      lookBack: readLookBack(),
+      shakeEnabled: readShakeEnabled(),
+    });
+  }
 }
 
 let vehicle: Vehicle | null = null;
+
+// Live chase camera stepped by worldTick (null until boot publishes it).
+let chase: ChaseCamera | null = null;
 
 // Async drive initialization: WASM embed (no fetch), flat slab, the
 // sedan-tune car. Failure leaves the menu drivable-less but alive.
@@ -256,7 +398,61 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   renderer.render(scene, camera);
   return (): void => {
+    try {
+      if (chase !== null) {
+        const state = chase.getState();
+        camera.fov = state.fov;
+        camera.updateProjectionMatrix();
+        camera.position.set(
+          state.position.x + state.shake.x,
+          state.position.y + state.shake.y,
+          state.position.z,
+        );
+        camera.lookAt(state.lookAt.x, state.lookAt.y, state.lookAt.z);
+      }
+    } catch {
+      // The chase view must never break rendering.
+    }
     renderer.render(scene, camera);
+  };
+}
+
+// Construct the live chase camera and publish the probe namespace.
+// The pure helpers stay available even when the vehicle never
+// initializes (the camera degrades to helper exposure plus a parked
+// zero-speed chase view).
+function publishCamera(): CameraNamespace {
+  const instance = new ChaseCamera();
+  chase = instance;
+  return {
+    instance,
+    fovForSpeed,
+    fov_for_speed: fovForSpeed,
+    lagWeight,
+    lag_weight: lagWeight,
+    shakeOffset,
+    shake_offset: shakeOffset,
+    update: (dt: number, sample: CameraSample): CameraPose =>
+      instance.update(dt, sample),
+    getState: (): CameraPose => instance.getState(),
+    get fov(): number {
+      return instance.fov;
+    },
+    get yaw(): number {
+      return instance.yaw;
+    },
+    get shake(): { x: number; y: number } {
+      return { ...instance.getState().shake };
+    },
+    get offset(): { x: number; y: number } {
+      return { ...instance.getState().offset };
+    },
+    get position(): Vec3 {
+      return { ...instance.position };
+    },
+    get lookAt(): Vec3 {
+      return { ...instance.getState().lookAt };
+    },
   };
 }
 
@@ -316,6 +512,7 @@ function boot(): void {
     gameState,
     input,
     race: { order, positions, drift, timetrial },
+    camera: publishCamera(),
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
