@@ -59,6 +59,7 @@ import {
   validateCityGrid,
 } from "./render/city";
 import { GameState, gameState } from "./game/state";
+import * as loaders from "./render/loaders";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
@@ -107,6 +108,7 @@ declare global {
       };
       camera: CameraNamespace;
       city: CityNamespace;
+      loaders: typeof loaders;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
@@ -652,6 +654,7 @@ function boot(): void {
     race: { order, positions, drift, timetrial },
     camera: publishCamera(),
     city,
+    loaders,
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
