@@ -2,6 +2,20 @@ import * as THREE from "three";
 import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events";
 import { start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
+import { getTune } from "./data/tunes";
+import { ensureRapierReady, PhysicsWorld, type Quat, type Vec3 } from "./physics/world";
+import {
+  clampToFrictionCircle,
+  computeLateralForce,
+  computeSuspensionForce,
+  resolveLimiterOrder,
+  resetCandidates,
+  sampleTorque,
+  tuneFromCarTune,
+  Vehicle,
+  type VehicleInputs,
+  type VehicleState,
+} from "./vehicles/vehicle";
 import {
   SAVE_KEY,
   SAVE_VERSION,
@@ -65,9 +79,37 @@ declare global {
         drift: typeof drift;
         timetrial: typeof timetrial;
       };
+      vehicle?: VehicleNamespace;
+      physics?: PhysicsNamespace;
     };
   }
 }
+
+// Probe-facing vehicle namespace: the live Rapier car plus the pure
+// port functions (suspension/tire/gearbox/reset math) so black-box
+// probes can drive the car and read the same numbers the tests pin.
+export type VehicleNamespace = {
+  instance: Vehicle;
+  inputs: VehicleInputs;
+  step: (dt: number) => void;
+  getState: () => VehicleState;
+  placeAt: (position: Vec3, quat?: Quat) => void;
+  setForwardSpeed: (speed: number) => void;
+  reset: () => void;
+  computeSuspensionForce: typeof computeSuspensionForce;
+  computeLateralForce: typeof computeLateralForce;
+  clampToFrictionCircle: typeof clampToFrictionCircle;
+  resolveLimiterOrder: typeof resolveLimiterOrder;
+  resetCandidates: typeof resetCandidates;
+  sampleTorque: typeof sampleTorque;
+};
+
+// Probe-facing physics namespace: the Rapier world wrapper.
+export type PhysicsNamespace = {
+  instance: PhysicsWorld;
+  stepWorld: () => void;
+  findClearResetPosition: (desired: Vec3) => Vec3;
+};
 
 type BootEvents = {
   boot: string;
@@ -142,9 +184,50 @@ function renderRace(ui: HTMLElement): void {
   ui.replaceChildren(race);
 }
 
-// Synchronous fixed-step world hook; a later vehicle lap replaces the body.
-export function worldTick(_dt: number): void {
-  return;
+// Synchronous fixed-step world hook: steps the live Rapier car when
+// physics has initialized; a no-op until then (menu still boots
+// without WASM). Driven by the 60 Hz accumulator in `loop`.
+export function worldTick(dt: number): void {
+  if (vehicle !== null) {
+    vehicle.step(dt);
+  }
+}
+
+let vehicle: Vehicle | null = null;
+
+// Async drive initialization: WASM embed (no fetch), flat slab, the
+// sedan-tune car. Failure leaves the menu drivable-less but alive.
+async function initDrive(): Promise<void> {
+  try {
+    await ensureRapierReady();
+    const world = new PhysicsWorld();
+    world.makeGround();
+    const sedan = getTune("sedan");
+    const car = new Vehicle(world, sedan === undefined ? {} : { tune: tuneFromCarTune(sedan) });
+    vehicle = car;
+    window.__nsr.vehicle = {
+      instance: car,
+      inputs: car.inputs,
+      step: (dt: number) => car.step(dt),
+      getState: () => car.getState(),
+      placeAt: (position: Vec3, quat?: Quat) => car.placeAt(position, quat),
+      setForwardSpeed: (speed: number) => car.setForwardSpeed(speed),
+      reset: () => car.resetVehicle(),
+      computeSuspensionForce,
+      computeLateralForce,
+      clampToFrictionCircle,
+      resolveLimiterOrder,
+      resetCandidates,
+      sampleTorque,
+    };
+    window.__nsr.physics = {
+      instance: world,
+      stepWorld: () => world.stepWorld(),
+      findClearResetPosition: (desired: Vec3) => world.findClearResetPosition(desired),
+    };
+  } catch {
+    vehicle = null;
+  }
 }
 
 // Pause entry point: gates stepping only while the rAF loop and DOM stay
@@ -229,6 +312,9 @@ function boot(): void {
     gameState,
     race: { order, positions, drift, timetrial },
   };
+  // Physics initializes asynchronously (WASM compile); the loop keeps
+  // stepping the menu meanwhile and picks up the car once ready.
+  void initDrive();
   loop = start((dt) => {
     worldTick(dt);
     fixedSteps += 1;
