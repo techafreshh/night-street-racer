@@ -4,7 +4,7 @@ import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events"
 import { start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
 import { getTune } from "./data/tunes";
-import { ensureRapierReady, PhysicsWorld, rotateVecByQuat, type Quat, type Vec3 } from "./physics/world";
+import { ensureRapierReady, PhysicsWorld, rotateVecByQuat, STEP_DT, type Quat, type Vec3 } from "./physics/world";
 import {
   clampToFrictionCircle,
   computeLateralForce,
@@ -79,6 +79,7 @@ import {
   resizeRenderer,
 } from "./render/renderer";
 import { createFog, loadEnvironment } from "./render/sky";
+import { Traffic, type CarState, type TrafficCar } from "./traffic/traffic";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
@@ -129,6 +130,7 @@ declare global {
         timetrial: typeof timetrial;
       };
       ai: AiNamespace;
+      traffic: TrafficNamespace;
       camera: CameraNamespace;
       city: CityNamespace;
       lighting: LightingNamespace;
@@ -200,6 +202,23 @@ export type CameraNamespace = {
   readonly offset: { x: number; y: number };
   readonly position: Vec3;
   readonly lookAt: Vec3;
+};
+
+// Probe-facing traffic namespace: the live kinematic fleet plus the pure
+// lane helpers behind getters, so black-box probes read the same numbers
+// the tests pin (car count, speeds, poses) with either casing.
+export type TrafficNamespace = {
+  instance: Traffic;
+  cars: TrafficCar[];
+  step: (dt?: number, playerPos?: Vec3) => void;
+  setBlocked: (index: number, value: boolean | null) => void;
+  set_blocked: (index: number, value: boolean | null) => void;
+  setBlockedOverride: (index: number, value: boolean | null) => void;
+  teleportCar: (index: number, position: Vec3) => void;
+  teleport_car: (index: number, position: Vec3) => void;
+  setPlayerPos: (position: Vec3) => void;
+  set_player_pos: (position: Vec3) => void;
+  getState: (index: number) => CarState;
 };
 
 // Probe-facing vehicle namespace: the live Rapier car plus the pure
@@ -448,6 +467,14 @@ function readShakeEnabled(): boolean {
 // (position/yaw/speed/slip plus look-back and the polled shake flag).
 // Driven by the 60 Hz accumulator in `loop`.
 export function worldTick(dt: number): void {
+  if (traffic !== null) {
+    try {
+      traffic.step(dt, currentAnchor());
+      traffic.syncKinematics();
+    } catch {
+      // Traffic must never break the fixed step.
+    }
+  }
   if (vehicle !== null) {
     vehicle.step(dt);
   }
@@ -499,6 +526,73 @@ export function worldTick(dt: number): void {
 }
 
 let vehicle: Vehicle | null = null;
+
+// Live ambient traffic fleet behind the probe namespace (pure until the
+// shared drive world attaches kinematics in initDrive).
+let traffic: Traffic | null = null;
+
+function ensureTraffic(): Traffic {
+  if (traffic === null) {
+    traffic = new Traffic();
+  }
+  return traffic;
+}
+
+// Player anchor for the traffic tick: the live vehicle position, falling
+// back to the stored traffic anchor and finally the origin. Never throws.
+function currentAnchor(): Vec3 {
+  try {
+    const live = vehicle ?? windowNSRVehicle();
+    if (live !== null) {
+      return { ...live.getState().position };
+    }
+  } catch {
+    // Fall through to the stored anchor.
+  }
+  try {
+    if (traffic !== null) {
+      return { ...traffic.playerPos };
+    }
+  } catch {
+    // Fall through to the origin.
+  }
+  return { x: 0, y: 0, z: 0 };
+}
+
+// Probe-facing traffic namespace over the shared fleet instance (same
+// cars array reference, so probes read live poses and speeds).
+function publishTraffic(): TrafficNamespace {
+  const instance = ensureTraffic();
+  const setBlocked = (index: number, value: boolean | null): void => {
+    instance.setBlockedOverride(index, value);
+  };
+  const teleportCar = (index: number, position: Vec3): void => {
+    instance.teleportCar(index, position);
+  };
+  const setPlayerPos = (position: Vec3): void => {
+    instance.setPlayerPos(position);
+  };
+  return {
+    instance,
+    cars: instance.cars,
+    step: (dt: number = STEP_DT, playerPos?: Vec3): void => {
+      try {
+        instance.step(dt, playerPos ?? currentAnchor());
+        instance.syncKinematics();
+      } catch {
+        // Probes must never break stepping.
+      }
+    },
+    setBlocked,
+    set_blocked: setBlocked,
+    setBlockedOverride: setBlocked,
+    teleportCar,
+    teleport_car: teleportCar,
+    setPlayerPos,
+    set_player_pos: setPlayerPos,
+    getState: (index: number): CarState => instance.carState(index),
+  };
+}
 
 // Live chase camera stepped by worldTick (null until boot publishes it).
 let chase: ChaseCamera | null = null;
@@ -619,6 +713,11 @@ async function initDrive(): Promise<void> {
       resetCandidates,
       sampleTorque,
     };
+    try {
+      ensureTraffic().attachKinematics(world.world, RAPIER);
+    } catch {
+      // Traffic stays pure-lane; the fleet still cruises without bodies.
+    }
     window.__nsr.physics = {
       instance: world,
       stepWorld: () => world.stepWorld(),
@@ -897,6 +996,7 @@ function boot(): void {
       GAIN: rubberBandMod.GAIN,
     },
     camera: publishCamera(),
+    traffic: publishTraffic(),
     city,
     lighting: publishLighting(),
     loaders,
