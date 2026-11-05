@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-11-05):** this is the shipped Godot build's contract; the product now continues on the web platform — see [PRD_v2.md](PRD_v2.md).
+
 # PRD: Night Street Racer
 
 **Status:** v2 — factory delivery amendment (2026-11-01)
