@@ -8,3 +8,4 @@ build/
 # Web
 web/dist/
 web/node_modules/
+/node_modules/
