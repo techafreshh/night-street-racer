@@ -83,6 +83,9 @@ import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
 import * as timetrial from "./race/timetrial";
+import * as aiInputMod from "./ai/ai_input";
+import * as racingLine from "./ai/racing_line";
+import * as rubberBandMod from "./ai/rubber_band";
 
 // Probe-facing handles for the v1 save/progression system: bundled so the
 // running service exposes the same load/save behavior the issue pins to
@@ -125,6 +128,7 @@ declare global {
         drift: typeof drift;
         timetrial: typeof timetrial;
       };
+      ai: AiNamespace;
       camera: CameraNamespace;
       city: CityNamespace;
       lighting: LightingNamespace;
@@ -134,6 +138,48 @@ declare global {
     };
   }
 }
+
+// Probe-facing AI namespace: the pure racing-line / pursuit / rubber-band
+// port (no vehicle or WASM init needed), so black-box probes read the same
+// numbers the tests pin through window.__nsr.ai on the running service.
+export type AiNamespace = {
+  bakeRacingLine: typeof racingLine.bakeRacingLine;
+  bake_racing_line: typeof racingLine.bake_racing_line;
+  bakeSpeeds: typeof racingLine.bakeSpeeds;
+  bake_speeds: typeof racingLine.bake_speeds;
+  curvatureOf: typeof racingLine.curvatureOf;
+  curvature_of: typeof racingLine.curvature_of;
+  rawSpeed: typeof racingLine.rawSpeed;
+  raw_speed: typeof racingLine.raw_speed;
+  trackLength: typeof racingLine.trackLength;
+  track_length: typeof racingLine.track_length;
+  arcOf: typeof racingLine.arcOf;
+  arc_of: typeof racingLine.arc_of;
+  lookaheadPoint: typeof racingLine.lookaheadPoint;
+  lookahead_point: typeof racingLine.lookahead_point;
+  pointAtArc: typeof racingLine.pointAtArc;
+  point_at_arc: typeof racingLine.point_at_arc;
+  speedAtArc: typeof racingLine.speedAtArc;
+  speed_at_arc: typeof racingLine.speed_at_arc;
+  closestIndex: typeof racingLine.closestIndex;
+  closest_index: typeof racingLine.closest_index;
+  aiInput: typeof aiInputMod.aiInput;
+  ai_input: typeof aiInputMod.ai_input;
+  lookaheadFor: typeof aiInputMod.lookaheadFor;
+  lookahead_for: typeof aiInputMod.lookahead_for;
+  rubberBand: typeof rubberBandMod.rubberBand;
+  rubber_band: typeof rubberBandMod.rubber_band;
+  computeAid: typeof rubberBandMod.computeAid;
+  compute_aid: typeof rubberBandMod.compute_aid;
+  wrapGap: typeof rubberBandMod.wrapGap;
+  wrap_gap: typeof rubberBandMod.wrap_gap;
+  MIN_SPEED: number;
+  MAX_SPEED: number;
+  LATERAL_ACCEL: number;
+  BRAKE_DECEL: number;
+  MAX_AID: number;
+  GAIN: number;
+};
 
 // Probe-facing chase-camera namespace: the live ChaseCamera plus the pure
 // port helpers (FOV/lag/shake math) so black-box probes can read the same
@@ -812,6 +858,44 @@ function boot(): void {
     gameState,
     input,
     race: { order, positions, drift, timetrial },
+    ai: {
+      bakeRacingLine: racingLine.bakeRacingLine,
+      bake_racing_line: racingLine.bake_racing_line,
+      bakeSpeeds: racingLine.bakeSpeeds,
+      bake_speeds: racingLine.bake_speeds,
+      curvatureOf: racingLine.curvatureOf,
+      curvature_of: racingLine.curvature_of,
+      rawSpeed: racingLine.rawSpeed,
+      raw_speed: racingLine.raw_speed,
+      trackLength: racingLine.trackLength,
+      track_length: racingLine.track_length,
+      arcOf: racingLine.arcOf,
+      arc_of: racingLine.arc_of,
+      lookaheadPoint: racingLine.lookaheadPoint,
+      lookahead_point: racingLine.lookahead_point,
+      pointAtArc: racingLine.pointAtArc,
+      point_at_arc: racingLine.point_at_arc,
+      speedAtArc: racingLine.speedAtArc,
+      speed_at_arc: racingLine.speed_at_arc,
+      closestIndex: racingLine.closestIndex,
+      closest_index: racingLine.closest_index,
+      aiInput: aiInputMod.aiInput,
+      ai_input: aiInputMod.ai_input,
+      lookaheadFor: aiInputMod.lookaheadFor,
+      lookahead_for: aiInputMod.lookahead_for,
+      rubberBand: rubberBandMod.rubberBand,
+      rubber_band: rubberBandMod.rubber_band,
+      computeAid: rubberBandMod.computeAid,
+      compute_aid: rubberBandMod.compute_aid,
+      wrapGap: rubberBandMod.wrapGap,
+      wrap_gap: rubberBandMod.wrap_gap,
+      MIN_SPEED: racingLine.MIN_SPEED,
+      MAX_SPEED: racingLine.MAX_SPEED,
+      LATERAL_ACCEL: racingLine.LATERAL_ACCEL,
+      BRAKE_DECEL: racingLine.BRAKE_DECEL,
+      MAX_AID: rubberBandMod.MAX_AID,
+      GAIN: rubberBandMod.GAIN,
+    },
     camera: publishCamera(),
     city,
     lighting: publishLighting(),
