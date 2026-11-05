@@ -22,6 +22,10 @@ import {
 } from "./game/progression";
 import { SettingsStore, settings } from "./game/settings";
 import { GameState, gameState } from "./game/state";
+import * as drift from "./race/drift";
+import * as order from "./race/order";
+import * as positions from "./race/positions";
+import * as timetrial from "./race/timetrial";
 
 // Probe-facing handles for the v1 save/progression system: bundled so the
 // running service exposes the same load/save behavior the issue pins to
@@ -55,6 +59,12 @@ declare global {
       };
       settings: SettingsStore;
       gameState: GameState;
+      race: {
+        order: typeof order;
+        positions: typeof positions;
+        drift: typeof drift;
+        timetrial: typeof timetrial;
+      };
     };
   }
 }
@@ -217,6 +227,7 @@ function boot(): void {
     },
     settings,
     gameState,
+    race: { order, positions, drift, timetrial },
   };
   loop = start((dt) => {
     worldTick(dt);
