@@ -2,7 +2,30 @@ import * as THREE from "three";
 import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events";
 import { start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
+import {
+  SAVE_KEY,
+  SAVE_VERSION,
+  SCHEMA_VERSION,
+  defaultSave,
+  loadSave,
+  saveNow,
+  validateSave,
+} from "./game/save";
+import {
+  LADDER,
+  REWARD_CARS,
+  applyResult,
+  canUnlockNext,
+  carReward,
+  mappedCar,
+  nextEventAfter,
+} from "./game/progression";
+import { SettingsStore, settings } from "./game/settings";
+import { GameState, gameState } from "./game/state";
 
+// Probe-facing handles for the v1 save/progression system: bundled so the
+// running service exposes the same load/save behavior the issue pins to
+// localStorage["nsr_save"]. Read-only besides explicit setter/flush calls.
 declare global {
   interface Window {
     __fixedSteps: number;
@@ -11,6 +34,28 @@ declare global {
     __setPaused: (paused: boolean) => void;
     __raceEmitter: EventEmitter<RaceEvents>;
     __emitter: EventEmitter<RaceEvents>;
+    __nsr: {
+      save: {
+        SAVE_KEY: string;
+        SAVE_VERSION: number;
+        SCHEMA_VERSION: number;
+        defaultSave: typeof defaultSave;
+        validateSave: typeof validateSave;
+        loadSave: typeof loadSave;
+        saveNow: typeof saveNow;
+      };
+      progression: {
+        LADDER: string[];
+        REWARD_CARS: string[];
+        nextEventAfter: typeof nextEventAfter;
+        mappedCar: typeof mappedCar;
+        canUnlockNext: typeof canUnlockNext;
+        carReward: typeof carReward;
+        applyResult: typeof applyResult;
+      };
+      settings: SettingsStore;
+      gameState: GameState;
+    };
   }
 }
 
@@ -148,6 +193,31 @@ function boot(): void {
   window.setPaused = setPaused;
   window.pause = setPaused;
   window.__setPaused = setPaused;
+  // Mirror the Godot autoload _ready reload: lenient-load the v1 save on
+  // boot (read-only; writes happen only through setters plus flush()).
+  loadSave();
+  window.__nsr = {
+    save: {
+      SAVE_KEY,
+      SAVE_VERSION,
+      SCHEMA_VERSION,
+      defaultSave,
+      validateSave,
+      loadSave,
+      saveNow,
+    },
+    progression: {
+      LADDER,
+      REWARD_CARS,
+      nextEventAfter,
+      mappedCar,
+      canUnlockNext,
+      carReward,
+      applyResult,
+    },
+    settings,
+    gameState,
+  };
   loop = start((dt) => {
     worldTick(dt);
     fixedSteps += 1;
