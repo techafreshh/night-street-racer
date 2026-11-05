@@ -84,6 +84,8 @@ import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
 import * as timetrial from "./race/timetrial";
+import { manager as raceManager, type RaceManager } from "./race/manager";
+import * as raceRoute from "./race/route";
 import * as aiInputMod from "./ai/ai_input";
 import * as racingLine from "./ai/racing_line";
 import * as rubberBandMod from "./ai/rubber_band";
@@ -128,6 +130,8 @@ declare global {
         positions: typeof positions;
         drift: typeof drift;
         timetrial: typeof timetrial;
+        manager: RaceManager;
+        route: typeof raceRoute;
       };
       ai: AiNamespace;
       traffic: TrafficNamespace;
@@ -478,6 +482,30 @@ export function worldTick(dt: number): void {
   if (vehicle !== null) {
     vehicle.step(dt);
   }
+  // Race flow: the manager is clock-authoritative, so every fixed step
+  // advances it while a race is armed. The live vehicle sample feeds
+  // racer 0 gate proximity (clock-only step when no vehicle exists yet).
+  // Never throws: the race flow must not break the fixed step.
+  try {
+    if (raceManager.state === "countdown" || raceManager.state === "racing") {
+      const live = vehicle ?? windowNSRVehicle();
+      let sample: Vec3 | null = null;
+      if (live !== null) {
+        try {
+          sample = live.getState().position;
+        } catch {
+          sample = null;
+        }
+      }
+      if (sample !== null) {
+        raceManager.step(dt, { x: sample.x, y: sample.y, z: sample.z });
+      } else {
+        raceManager.step(dt);
+      }
+    }
+  } catch {
+    // The race flow must never break the fixed step.
+  }
   let carPos: Vec3 = { x: 0, y: 0, z: 0 };
   let carYaw = chase !== null ? chase.yaw : 0;
   if (chase !== null) {
@@ -732,6 +760,11 @@ async function initDrive(): Promise<void> {
 // alive. Aliased to window.setPaused/window.pause/window.__setPaused.
 function setPaused(paused: boolean): void {
   loop?.setPaused(paused);
+  try {
+    raceManager.setPaused(paused);
+  } catch {
+    // The race clock shares the pause gate; never break it.
+  }
 }
 
 type RenderScene = () => void;
@@ -929,6 +962,26 @@ function boot(): void {
   window.pause = setPaused;
   window.__setPaused = setPaused;
   window.__input = input;
+  // Race flow signals: manager phase/checkpoint callbacks forward into
+  // the shared raceEmitter (onRaceStateChanged/onCheckpoint), closing
+  // the loop without the pure manager importing events or the DOM.
+  raceManager.onStateChanged = (state): void => {
+    if (state === "idle") {
+      return;
+    }
+    try {
+      raceEmitter.emit("onRaceStateChanged", { state });
+    } catch {
+      // Signal faults must never break boot.
+    }
+  };
+  raceManager.onCheckpoint = (index): void => {
+    try {
+      raceEmitter.emit("onCheckpoint", { index });
+    } catch {
+      // Signal faults must never break boot.
+    }
+  };
   const city = publishCity();
   window.__city = city;
   // Mirror the Godot autoload _ready reload: lenient-load the v1 save on
@@ -956,7 +1009,7 @@ function boot(): void {
     settings,
     gameState,
     input,
-    race: { order, positions, drift, timetrial },
+    race: { order, positions, drift, timetrial, manager: raceManager, route: raceRoute },
     ai: {
       bakeRacingLine: racingLine.bakeRacingLine,
       bake_racing_line: racingLine.bake_racing_line,
