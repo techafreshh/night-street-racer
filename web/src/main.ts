@@ -1,6 +1,18 @@
 import * as THREE from "three";
-import { EventEmitter } from "./core/events";
-import { start } from "./core/loop";
+import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events";
+import { start, type LoopHandle } from "./core/loop";
+import { Router } from "./core/router";
+
+declare global {
+  interface Window {
+    __fixedSteps: number;
+    setPaused: (paused: boolean) => void;
+    pause: (paused: boolean) => void;
+    __setPaused: (paused: boolean) => void;
+    __raceEmitter: EventEmitter<RaceEvents>;
+    __emitter: EventEmitter<RaceEvents>;
+  }
+}
 
 type BootEvents = {
   boot: string;
@@ -8,6 +20,13 @@ type BootEvents = {
 };
 
 const bootEvents = new EventEmitter<BootEvents>();
+
+// Shared race signal bus; aliased to window.__raceEmitter/__emitter in boot.
+const raceEmitter = createRaceEmitter();
+
+// Monotonic fixed-step counter mirrored to window.__fixedSteps.
+let fixedSteps = 0;
+let loop: LoopHandle | null = null;
 
 interface MenuEvent {
   routeId: string;
@@ -53,7 +72,35 @@ function renderMenu(ui: HTMLElement): void {
   ui.replaceChildren(menu);
 }
 
-function initScene(canvas: HTMLCanvasElement): void {
+function renderRace(ui: HTMLElement): void {
+  const race = document.createElement("div");
+  race.className = "race";
+
+  const title = document.createElement("h1");
+  title.textContent = "Race";
+  race.appendChild(title);
+
+  const status = document.createElement("p");
+  status.textContent = "Get ready…";
+  race.appendChild(status);
+
+  ui.replaceChildren(race);
+}
+
+// Synchronous fixed-step world hook; a later vehicle lap replaces the body.
+export function worldTick(_dt: number): void {
+  return;
+}
+
+// Pause entry point: gates stepping only while the rAF loop and DOM stay
+// alive. Aliased to window.setPaused/window.pause/window.__setPaused.
+function setPaused(paused: boolean): void {
+  loop?.setPaused(paused);
+}
+
+type RenderScene = () => void;
+
+function initScene(canvas: HTMLCanvasElement): RenderScene {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   const scene = new THREE.Scene();
@@ -67,6 +114,9 @@ function initScene(canvas: HTMLCanvasElement): void {
   camera.position.set(0, 2, 6);
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   renderer.render(scene, camera);
+  return (): void => {
+    renderer.render(scene, camera);
+  };
 }
 
 function boot(): void {
@@ -74,20 +124,42 @@ function boot(): void {
   if (ui === null) {
     return;
   }
+  const router = new Router(ui);
+  router.register("menu", renderMenu);
+  router.register("race", renderRace);
+  router.show("menu");
+  bootEvents.emit("menu", "menu-ready");
   // The menu renders from DOM regardless of WebGL availability so the
   // page is usable even when headless Chromium lacks a GPU.
-  renderMenu(ui);
-  bootEvents.emit("menu", "menu-ready");
+  let renderScene: RenderScene = (): void => {};
   try {
     const canvas = document.getElementById("scene");
     if (canvas instanceof HTMLCanvasElement) {
-      initScene(canvas);
+      renderScene = initScene(canvas);
     }
   } catch {
     // WebGL unavailable (e.g. headless without GPU): menu stays.
   }
   bootEvents.emit("boot", "booted");
-  start(() => {});
+  fixedSteps = 0;
+  window.__fixedSteps = 0;
+  window.__raceEmitter = raceEmitter;
+  window.__emitter = raceEmitter;
+  window.setPaused = setPaused;
+  window.pause = setPaused;
+  window.__setPaused = setPaused;
+  loop = start((dt) => {
+    worldTick(dt);
+    fixedSteps += 1;
+    window.__fixedSteps = fixedSteps;
+  });
+  // Render reads the latest state every frame, independent of stepping,
+  // so pause gates steps while the scene and DOM stay alive.
+  const renderFrame = (): void => {
+    renderScene();
+    requestAnimationFrame(renderFrame);
+  };
+  requestAnimationFrame(renderFrame);
   console.info("MENU_READY");
 }
 
