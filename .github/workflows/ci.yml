@@ -53,3 +53,31 @@ jobs:
       - name: Run GDScript tests
         timeout-minutes: 5
         run: godot --headless --path . --script res://tests/run_all.gd
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Typecheck web
+        run: npm run typecheck
+
+      - name: Test web
+        run: npx vitest run
+
+      - name: Build web
+        run: npm run build
