@@ -37,6 +37,11 @@ function healthPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [healthPlugin()],
+  server: {
+    port: Number(process.env.PORT ?? DEFAULT_PORT),
+    host: true,
+    strictPort: true,
+  },
   preview: {
     port: Number(process.env.PORT ?? DEFAULT_PORT),
     host: true,
