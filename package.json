@@ -1,0 +1,20 @@
+{
+  "name": "night-street-racer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=web",
+    "typecheck": "npm run typecheck --workspace=web",
+    "build": "npm run build --workspace=web",
+    "serve": "npm run serve --workspace=web",
+    "start": "npm run serve --workspace=web",
+    "smoke": "npm run smoke --workspace=web"
+  }
+}

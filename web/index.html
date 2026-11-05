@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Night Street Racer</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #0a0a12;
+        color: #f2f2f2;
+        font-family: system-ui, sans-serif;
+        overflow: hidden;
+      }
+      #scene {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #ui {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: none;
+      }
+      #ui .menu {
+        pointer-events: auto;
+        background: rgba(10, 10, 18, 0.85);
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 24px 32px;
+        text-align: center;
+      }
+      #ui .menu h1 {
+        margin: 0 0 16px;
+        font-size: 28px;
+        letter-spacing: 1px;
+      }
+      #ui .menu button {
+        display: block;
+        width: 220px;
+        margin: 8px auto;
+        padding: 10px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      #ui .event-list {
+        list-style: none;
+        margin: 16px 0 0;
+        padding: 0;
+        font-size: 14px;
+        color: #bbb;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="ui">Loading…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
