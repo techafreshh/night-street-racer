@@ -60,6 +60,25 @@ import {
 } from "./render/city";
 import { GameState, gameState } from "./game/state";
 import * as loaders from "./render/loaders";
+import type { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { PASS_NAMES, createNightComposer } from "./render/composer";
+import {
+  MAX_LIGHTS_PER_MESH,
+  buildLightRig,
+  countRigLights,
+  updateHeadlights,
+  type LightRig,
+} from "./render/lights";
+import {
+  buildEmissiveDressing,
+  createWetAsphalt,
+} from "./render/materials";
+import {
+  TONE_MAPPING,
+  createNightRenderer,
+  resizeRenderer,
+} from "./render/renderer";
+import { createFog, loadEnvironment } from "./render/sky";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
@@ -108,6 +127,7 @@ declare global {
       };
       camera: CameraNamespace;
       city: CityNamespace;
+      lighting: LightingNamespace;
       loaders: typeof loaders;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
@@ -181,6 +201,51 @@ export type CityNamespace = {
   readonly world: RAPIER.World | null;
   readonly ready: boolean;
 };
+
+// Probe-facing night lighting namespace: the live renderer/composer
+// plus the light rig behind getters, so black-box probes read the same
+// tone mapping, pass list, and light counts the tests pin. Additive
+// aliases (tone_mapping, pass_names) mirror the existing __nsr idiom.
+export type LightingNamespace = {
+  readonly renderer: THREE.WebGLRenderer | null;
+  readonly composer: EffectComposer | null;
+  readonly passes: readonly string[];
+  readonly pass_names: readonly string[];
+  readonly rig: LightRig | null;
+  readonly counts: { total: number; maxPerMesh: number };
+  readonly toneMapping: number;
+  readonly tone_mapping: number;
+};
+
+// Construct the lighting probe namespace over the module rig handles.
+// Live getters so probes always read the current renderer/composer.
+function publishLighting(): LightingNamespace {
+  return {
+    get renderer(): THREE.WebGLRenderer | null {
+      return nightRenderer;
+    },
+    get composer(): EffectComposer | null {
+      return nightComposer;
+    },
+    passes: PASS_NAMES,
+    pass_names: PASS_NAMES,
+    get rig(): LightRig | null {
+      return lightRig;
+    },
+    get counts(): { total: number; maxPerMesh: number } {
+      return {
+        total: lightRig !== null ? countRigLights(lightRig) : 0,
+        maxPerMesh: MAX_LIGHTS_PER_MESH,
+      };
+    },
+    get toneMapping(): number {
+      return nightRenderer?.toneMapping ?? TONE_MAPPING;
+    },
+    get tone_mapping(): number {
+      return nightRenderer?.toneMapping ?? TONE_MAPPING;
+    },
+  };
+}
 
 type BootEvents = {
   boot: string;
@@ -340,10 +405,10 @@ export function worldTick(dt: number): void {
   if (vehicle !== null) {
     vehicle.step(dt);
   }
+  let carPos: Vec3 = { x: 0, y: 0, z: 0 };
+  let carYaw = chase !== null ? chase.yaw : 0;
   if (chase !== null) {
     const stepDt = Number.isFinite(dt) && dt > 0 ? dt : 1 / 60;
-    let carPos: Vec3 = { x: 0, y: 0, z: 0 };
-    let carYaw = chase.yaw;
     let speedMs = 0;
     let slipRad = 0;
     const live = vehicle ?? windowNSRVehicle();
@@ -371,6 +436,13 @@ export function worldTick(dt: number): void {
       shakeEnabled: readShakeEnabled(),
     });
   }
+  if (lightRig !== null) {
+    try {
+      updateHeadlights(lightRig, carPos, carYaw);
+    } catch {
+      // Headlights must never break the fixed step.
+    }
+  }
   if (cityWorld !== null) {
     try {
       cityWorld.step();
@@ -388,6 +460,12 @@ let chase: ChaseCamera | null = null;
 // Live Rapier city world behind the probe namespace (null until the
 // async WASM init lands city colliders without blocking menu render).
 let cityWorld: RAPIER.World | null = null;
+
+// Live night rig handles behind the lighting probe namespace (set in
+// initScene, stepped in worldTick).
+let nightRenderer: THREE.WebGLRenderer | null = null;
+let nightComposer: EffectComposer | null = null;
+let lightRig: LightRig | null = null;
 
 // Synchronous probe namespace over the district grid with live getters
 // for the async city world. Additive aliases (window.__city plus
@@ -514,10 +592,11 @@ function setPaused(paused: boolean): void {
 type RenderScene = () => void;
 
 function initScene(canvas: HTMLCanvasElement): RenderScene {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  const renderer = createNightRenderer(canvas);
+  nightRenderer = renderer;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0a12);
+  scene.fog = createFog();
   const camera = new THREE.PerspectiveCamera(
     60,
     window.innerWidth / window.innerHeight,
@@ -525,16 +604,97 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
     1000,
   );
   camera.position.set(0, 2, 6);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   try {
+    lightRig = buildLightRig();
+    const rig = lightRig;
+    scene.add(rig.moon);
+    scene.add(rig.hemi);
+    for (const spot of rig.headlights) {
+      scene.add(spot);
+      scene.add(spot.target);
+    }
+    for (const lamp of rig.lamps) {
+      scene.add(lamp);
+    }
+  } catch {
+    lightRig = null;
+  }
+  try {
+    const wetAsphalt = createWetAsphalt();
     for (const mesh of buildRoadMeshes()) {
+      mesh.material = wetAsphalt;
       scene.add(mesh);
     }
-    scene.add(buildBlockMeshes());
+    const blocks = buildBlockMeshes();
+    blocks.material = createWetAsphalt();
+    scene.add(blocks);
   } catch {
     // The menu renders without the district when headless.
   }
-  renderer.render(scene, camera);
+  try {
+    scene.add(buildEmissiveDressing());
+  } catch {
+    // Emissive dressing is additive; the menu stays without it.
+  }
+  if (renderer !== null) {
+    try {
+      nightComposer = createNightComposer(renderer, scene, camera);
+    } catch {
+      nightComposer = null;
+    }
+    try {
+      void loadEnvironment(renderer).then((env) => {
+        try {
+          if (env.envTexture !== null) {
+            scene.environment = env.envTexture;
+          }
+          if (env.background !== null) {
+            scene.background = env.background;
+          }
+        } catch {
+          // Environment assignment must never break rendering.
+        }
+      });
+    } catch {
+      // The rig holds the fog fallback without the HDRI.
+    }
+    try {
+      window.addEventListener("resize", () => {
+        try {
+          camera.aspect = window.innerWidth / window.innerHeight;
+          camera.updateProjectionMatrix();
+          resizeRenderer(
+            nightRenderer,
+            nightComposer,
+            window.innerWidth,
+            window.innerHeight,
+          );
+        } catch {
+          // Resizes must never break rendering.
+        }
+      });
+    } catch {
+      // Resize wiring is best-effort.
+    }
+  } else {
+    nightComposer = null;
+  }
+  const renderNow = (): void => {
+    try {
+      if (nightComposer !== null) {
+        nightComposer.render();
+      } else if (nightRenderer !== null) {
+        nightRenderer.render(scene, camera);
+      }
+    } catch {
+      try {
+        nightRenderer?.render(scene, camera);
+      } catch {
+        // Headless: the menu stays alive without frames.
+      }
+    }
+  };
+  renderNow();
   return (): void => {
     try {
       if (chase !== null) {
@@ -551,7 +711,7 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
     } catch {
       // The chase view must never break rendering.
     }
-    renderer.render(scene, camera);
+    renderNow();
   };
 }
 
@@ -654,6 +814,7 @@ function boot(): void {
     race: { order, positions, drift, timetrial },
     camera: publishCamera(),
     city,
+    lighting: publishLighting(),
     loaders,
   };
   // Real keyboard feeds the shared table through window listeners;
