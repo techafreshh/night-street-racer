@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import RAPIER from "@dimforge/rapier3d-compat";
 import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events";
 import { start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
@@ -44,6 +45,19 @@ import {
   nextEventAfter,
 } from "./game/progression";
 import { SettingsStore, settings } from "./game/settings";
+import {
+  BLOCK_CENTERS,
+  ROAD_CENTERLINES,
+  addBarrierColliders,
+  addGroundColliders,
+  buildBlockMeshes,
+  buildRoadMeshes,
+  castRayDown,
+  createChassis,
+  createCityWorld,
+  groundTopY,
+  validateCityGrid,
+} from "./render/city";
 import { GameState, gameState } from "./game/state";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
@@ -62,6 +76,7 @@ declare global {
     __raceEmitter: EventEmitter<RaceEvents>;
     __emitter: EventEmitter<RaceEvents>;
     __input: PlayerInput;
+    __city: CityNamespace;
     __nsr: {
       save: {
         SAVE_KEY: string;
@@ -91,6 +106,7 @@ declare global {
         timetrial: typeof timetrial;
       };
       camera: CameraNamespace;
+      city: CityNamespace;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
@@ -142,6 +158,26 @@ export type PhysicsNamespace = {
   instance: PhysicsWorld;
   stepWorld: () => void;
   findClearResetPosition: (desired: Vec3) => Vec3;
+};
+
+// Probe-facing city namespace: the built district grid (constants plus
+// analytic queries) with the live Rapier city world behind getters, so
+// black-box probes read the same numbers the tests pin even before
+// WASM init finishes (the raycast falls back to the analytic surface).
+export type CityNamespace = {
+  centerlines: readonly number[];
+  centerLines: readonly number[];
+  blockCenters: readonly number[];
+  groundTopY: (x: number, z: number) => number;
+  ground_top_y: (x: number, z: number) => number;
+  castRayDown: (x: number, z: number) => number | null;
+  cast_ray_down: (x: number, z: number) => number | null;
+  createChassis: (pos?: Vec3, linvel?: Vec3) => unknown;
+  validateCityGrid: (grid?: unknown) => boolean;
+  validate_city_grid: (grid?: unknown) => boolean;
+  stepOnce: () => void;
+  readonly world: RAPIER.World | null;
+  readonly ready: boolean;
 };
 
 type BootEvents = {
@@ -333,12 +369,98 @@ export function worldTick(dt: number): void {
       shakeEnabled: readShakeEnabled(),
     });
   }
+  if (cityWorld !== null) {
+    try {
+      cityWorld.step();
+    } catch {
+      // Probe bodies must never break the fixed step.
+    }
+  }
 }
 
 let vehicle: Vehicle | null = null;
 
 // Live chase camera stepped by worldTick (null until boot publishes it).
 let chase: ChaseCamera | null = null;
+
+// Live Rapier city world behind the probe namespace (null until the
+// async WASM init lands city colliders without blocking menu render).
+let cityWorld: RAPIER.World | null = null;
+
+// Synchronous probe namespace over the district grid with live getters
+// for the async city world. Additive aliases (window.__city plus
+// window.__nsr.city); existing __fixedSteps/__nsr behavior is unchanged.
+function publishCity(): CityNamespace {
+  const raycast = (x: number, z: number): number | null => {
+    try {
+      if (cityWorld !== null) {
+        const hit = castRayDown(cityWorld, RAPIER, x, z);
+        if (hit !== null) {
+          return hit;
+        }
+      }
+    } catch {
+      // Fall through to the analytic surface.
+    }
+    return groundTopY(x, z);
+  };
+  return {
+    centerlines: ROAD_CENTERLINES,
+    centerLines: ROAD_CENTERLINES,
+    blockCenters: BLOCK_CENTERS,
+    groundTopY,
+    ground_top_y: groundTopY,
+    castRayDown: raycast,
+    cast_ray_down: raycast,
+    createChassis: (pos?: Vec3, linvel?: Vec3) => {
+      try {
+        if (cityWorld === null) {
+          return null;
+        }
+        return createChassis(
+          cityWorld,
+          RAPIER,
+          pos ?? { x: 0, y: 1, z: 0 },
+          linvel ?? { x: 0, y: 0, z: 0 },
+        );
+      } catch {
+        return null;
+      }
+    },
+    validateCityGrid,
+    validate_city_grid: validateCityGrid,
+    stepOnce: (): void => {
+      try {
+        cityWorld?.step();
+      } catch {
+        // Probe bodies must never break the fixed step.
+      }
+    },
+    get world(): RAPIER.World | null {
+      return cityWorld;
+    },
+    get ready(): boolean {
+      return cityWorld !== null;
+    },
+  };
+}
+
+// Async city build: WASM embed (no fetch), base slab plus EW lips plus
+// route-edge walls. Failure leaves the menu drivable-less but alive.
+async function initCityPhysics(): Promise<void> {
+  try {
+    await ensureRapierReady();
+    if (cityWorld !== null) {
+      return;
+    }
+    const world = createCityWorld(RAPIER);
+    addGroundColliders(world, RAPIER);
+    addBarrierColliders(world, RAPIER);
+    cityWorld = world;
+  } catch {
+    cityWorld = null;
+  }
+}
 
 // Async drive initialization: WASM embed (no fetch), flat slab, the
 // sedan-tune car. Failure leaves the menu drivable-less but alive.
@@ -347,6 +469,12 @@ async function initDrive(): Promise<void> {
     await ensureRapierReady();
     const world = new PhysicsWorld();
     world.makeGround();
+    try {
+      addGroundColliders(world.world, RAPIER);
+      addBarrierColliders(world.world, RAPIER);
+    } catch {
+      // City statics are additive; the flat slab still drives.
+    }
     const sedan = getTune("sedan");
     const car = new Vehicle(world, sedan === undefined ? {} : { tune: tuneFromCarTune(sedan) });
     vehicle = car;
@@ -396,6 +524,14 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   );
   camera.position.set(0, 2, 6);
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  try {
+    for (const mesh of buildRoadMeshes()) {
+      scene.add(mesh);
+    }
+    scene.add(buildBlockMeshes());
+  } catch {
+    // The menu renders without the district when headless.
+  }
   renderer.render(scene, camera);
   return (): void => {
     try {
@@ -486,6 +622,8 @@ function boot(): void {
   window.pause = setPaused;
   window.__setPaused = setPaused;
   window.__input = input;
+  const city = publishCity();
+  window.__city = city;
   // Mirror the Godot autoload _ready reload: lenient-load the v1 save on
   // boot (read-only; writes happen only through setters plus flush()).
   loadSave();
@@ -513,6 +651,7 @@ function boot(): void {
     input,
     race: { order, positions, drift, timetrial },
     camera: publishCamera(),
+    city,
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
@@ -520,6 +659,7 @@ function boot(): void {
   // Physics initializes asynchronously (WASM compile); the loop keeps
   // stepping the menu meanwhile and picks up the car once ready.
   void initDrive();
+  void initCityPhysics();
   loop = start((dt) => {
     try {
       input.poll();

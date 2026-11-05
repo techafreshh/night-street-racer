@@ -5,14 +5,16 @@
 // must load these modules with no DOM/WebGL).
 import RAPIER from "@dimforge/rapier3d-compat";
 
-let rapierReady = false;
+let rapierInit: Promise<void> | null = null;
 
-// Compat build embeds WASM as base64: one awaited init, no fetch.
+// Compat build embeds WASM as base64: one awaited init, no fetch. The
+// shared promise keeps concurrent boot callers (drive plus city) from
+// starting two in-flight inits, which corrupts WASM memory.
 export async function ensureRapierReady(): Promise<void> {
-  if (!rapierReady) {
-    await RAPIER.init();
-    rapierReady = true;
+  if (rapierInit === null) {
+    rapierInit = RAPIER.init();
   }
+  await rapierInit;
 }
 
 // Fixed 60 Hz accumulator tick (loop.ts STEP idiom).
