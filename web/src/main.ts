@@ -109,7 +109,7 @@ import {
   resizeRenderer,
 } from "./render/renderer";
 import { createFog, loadEnvironment } from "./render/sky";
-import { Traffic, type CarState, type TrafficCar } from "./traffic/traffic";
+import { Traffic, sharedTraffic, type CarState, type TrafficCar } from "./traffic/traffic";
 import * as hud from "./ui/hud";
 import * as minimap from "./ui/minimap";
 import { renderEventSelect } from "./ui/eventSelect";
@@ -124,6 +124,14 @@ import * as order from "./race/order";
 import * as positions from "./race/positions";
 import * as timetrial from "./race/timetrial";
 import { manager as raceManager, type RaceManager } from "./race/manager";
+import {
+  armGridForEvent,
+  grid,
+  type GridBuildOpts,
+  type GridPoint,
+  type RaceGrid,
+  type RivalState,
+} from "./race/grid";
 import * as raceRoute from "./race/route";
 import * as aiInputMod from "./ai/ai_input";
 import * as racingLine from "./ai/racing_line";
@@ -178,6 +186,7 @@ declare global {
         timetrial: typeof timetrial;
         manager: RaceManager;
         route: typeof raceRoute;
+        grid: GridNamespace;
       };
       ai: AiNamespace;
       traffic: TrafficNamespace;
@@ -258,12 +267,35 @@ export type CameraNamespace = {
   readonly lookAt: Vec3;
 };
 
+// Probe-facing starting-grid namespace: the shared kinematic rival
+// fleet plus its build/advance/feed helpers, so black-box probes read
+// the same headcounts, poses, and tune snapshots the tests pin through
+// window.__nsr.race.grid on the running service (publishTraffic idiom:
+// live getters plus dual-casing aliases).
+export type GridNamespace = {
+  instance: RaceGrid;
+  rivals: RivalState[];
+  racers: string[];
+  eventId: string;
+  event_id: string;
+  build: (eventId: string, opts?: GridBuildOpts) => RaceGrid;
+  advance: (dt?: number) => void;
+  reset: () => void;
+  chassisWith: (playerPos?: GridPoint | null) => GridPoint[];
+  chassis_with: (playerPos?: GridPoint | null) => GridPoint[];
+};
+
 // Probe-facing traffic namespace: the live kinematic fleet plus the pure
 // lane helpers behind getters, so black-box probes read the same numbers
 // the tests pin (car count, speeds, poses) with either casing.
 export type TrafficNamespace = {
   instance: Traffic;
   cars: TrafficCar[];
+  active: boolean;
+  isActive: () => boolean;
+  is_active: () => boolean;
+  setActive: (value: boolean) => void;
+  set_active: (value: boolean) => void;
   step: (dt?: number, playerPos?: Vec3) => void;
   setBlocked: (index: number, value: boolean | null) => void;
   set_blocked: (index: number, value: boolean | null) => void;
@@ -658,11 +690,19 @@ export function worldTick(dt: number): void {
     vehicle.step(dt);
   }
   // Race flow: the manager is clock-authoritative, so every fixed step
-  // advances it while a race is armed. The live vehicle sample feeds
-  // racer 0 gate proximity (clock-only step when no vehicle exists yet).
-  // Never throws: the race flow must not break the fixed step.
+  // advances it while a race is armed. The grid advances its kinematic
+  // rivals first, then the full chassis array ([player, ...rivals]) feeds
+  // racer gate proximity (clock-only step when no vehicle exists yet).
+  // Traffic already stepped above, so it moves alongside the racers in
+  // race mode and eases to 0 when parked. Never throws: the race flow
+  // must not break the fixed step.
   try {
     if (raceManager.state === "countdown" || raceManager.state === "racing") {
+      try {
+        grid.advance(dt);
+      } catch {
+        // A stuck grid never breaks the race flow.
+      }
       const live = vehicle ?? windowNSRVehicle();
       let sample: Vec3 | null = null;
       if (live !== null) {
@@ -672,7 +712,15 @@ export function worldTick(dt: number): void {
           sample = null;
         }
       }
-      if (sample !== null) {
+      let chassis: GridPoint[] | undefined;
+      try {
+        chassis = grid.chassisWith(sample ?? undefined);
+      } catch {
+        chassis = undefined;
+      }
+      if (chassis !== undefined) {
+        raceManager.step(dt, chassis);
+      } else if (sample !== null) {
         raceManager.step(dt, { x: sample.x, y: sample.y, z: sample.z });
       } else {
         raceManager.step(dt);
@@ -880,7 +928,7 @@ let traffic: Traffic | null = null;
 
 function ensureTraffic(): Traffic {
   if (traffic === null) {
-    traffic = new Traffic();
+    traffic = sharedTraffic();
   }
   return traffic;
 }
@@ -906,6 +954,59 @@ function currentAnchor(): Vec3 {
   return { x: 0, y: 0, z: 0 };
 }
 
+// Probe-facing starting-grid namespace over the shared instance (same
+// rivals array reference, so probes read live poses and speeds).
+function publishGrid(): GridNamespace {
+  const build = (eventId: string, opts?: GridBuildOpts): RaceGrid => {
+    try {
+      return armGridForEvent(eventId, opts);
+    } catch {
+      return grid;
+    }
+  };
+  const advance = (dt: number = STEP_DT): void => {
+    try {
+      grid.advance(dt);
+    } catch {
+      // Probes must never break stepping.
+    }
+  };
+  const reset = (): void => {
+    try {
+      grid.reset();
+    } catch {
+      // Probes must never break stepping.
+    }
+  };
+  const chassisWith = (playerPos?: GridPoint | null): GridPoint[] => {
+    try {
+      return grid.chassisWith(playerPos);
+    } catch {
+      return [];
+    }
+  };
+  return {
+    instance: grid,
+    get rivals(): RivalState[] {
+      return grid.rivals;
+    },
+    get racers(): string[] {
+      return grid.racers;
+    },
+    get eventId(): string {
+      return grid.eventId;
+    },
+    get event_id(): string {
+      return grid.eventId;
+    },
+    build,
+    advance,
+    reset,
+    chassisWith,
+    chassis_with: chassisWith,
+  };
+}
+
 // Probe-facing traffic namespace over the shared fleet instance (same
 // cars array reference, so probes read live poses and speeds).
 function publishTraffic(): TrafficNamespace {
@@ -922,6 +1023,17 @@ function publishTraffic(): TrafficNamespace {
   return {
     instance,
     cars: instance.cars,
+    get active(): boolean {
+      return instance.isActive();
+    },
+    isActive: (): boolean => instance.isActive(),
+    is_active: (): boolean => instance.isActive(),
+    setActive: (value: boolean): void => {
+      instance.setActive(value);
+    },
+    set_active: (value: boolean): void => {
+      instance.setActive(value);
+    },
     step: (dt: number = STEP_DT, playerPos?: Vec3): void => {
       try {
         instance.step(dt, playerPos ?? currentAnchor());
@@ -1624,6 +1736,23 @@ function boot(): void {
       } catch {
         // Holder faults never block arming.
       }
+      // Full-grid arming (race.gd _spawn_rivals idiom): the shared grid
+      // bakes the same event with the player's selected car, and traffic
+      // cruises in race mode but parks (eases to 0) in time-trial. The
+      // effective id follows the manager fallback so grid and manager
+      // never disagree. Guarded so arming never throws.
+      try {
+        const carId = gameState.getSelectedCar() || gameState.getDefaultCar();
+        const effective = raceManager.eventId !== "" ? raceManager.eventId : id;
+        armGridForEvent(effective, { carId, solo });
+      } catch {
+        // Grid faults never block arming.
+      }
+      try {
+        ensureTraffic().setActive(!solo);
+      } catch {
+        // Traffic-mode faults never block arming.
+      }
     } catch {
       // Arming never throws.
     }
@@ -1665,7 +1794,7 @@ function boot(): void {
     settings,
     gameState,
     input,
-    race: { order, positions, drift: { ...drift, ...recordsApi.driftApi }, timetrial: { ...timetrial, ...recordsApi.timetrialApi }, manager: raceManager, route: raceRoute },
+    race: { order, positions, drift: { ...drift, ...recordsApi.driftApi }, timetrial: { ...timetrial, ...recordsApi.timetrialApi }, manager: raceManager, route: raceRoute, grid: publishGrid() },
     ai: {
       bakeRacingLine: racingLine.bakeRacingLine,
       bake_racing_line: racingLine.bake_racing_line,

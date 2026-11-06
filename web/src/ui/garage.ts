@@ -15,6 +15,8 @@ import { LADDER, mappedCar } from "../game/progression";
 import { getBest } from "../game/records";
 import { gameState } from "../game/state";
 import { manager } from "../race/manager";
+import { armGridForEvent } from "../race/grid";
+import { sharedTraffic } from "../traffic/traffic";
 import { COLOR_COUNT, colorCss } from "../vehicles/paint";
 import { appendChild, menuButton, onPress, screenRoot, staticLine } from "./screens";
 
@@ -493,6 +495,21 @@ export function renderGarage(
           manager.best = stored > 0 ? stored : null;
         } catch {
           // Holder faults never block navigation.
+        }
+        // Full-grid arming mirrors main.ts startRace: the shared grid
+        // bakes the effective event with the player's selected car, and
+        // traffic cruises in race mode but parks in time-trial.
+        try {
+          const carId = gameState.getSelectedCar() || gameState.getDefaultCar();
+          const effective = manager.eventId !== "" ? manager.eventId : eventId;
+          armGridForEvent(effective, { carId, solo });
+        } catch {
+          // Grid faults never block navigation.
+        }
+        try {
+          sharedTraffic().setActive(!solo);
+        } catch {
+          // Traffic-mode faults never block navigation.
         }
       } catch {
         // Arming faults never block navigation.
