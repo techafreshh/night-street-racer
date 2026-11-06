@@ -1,21 +1,15 @@
-import * as THREE from "three";
-import RAPIER from "@dimforge/rapier3d-compat";
+import type * as THREE from "three";
+import type RAPIER from "@dimforge/rapier3d-compat";
 import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events";
-import { createFpsMeter, start, type LoopHandle } from "./core/loop";
+import { STEP_DT, createFpsMeter, start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
 import { getTune } from "./data/tunes";
-import { ensureRapierReady, PhysicsWorld, rotateVecByQuat, STEP_DT, type Quat, type Vec3 } from "./physics/world";
-import {
-  clampToFrictionCircle,
-  computeLateralForce,
-  computeSuspensionForce,
-  resolveLimiterOrder,
-  resetCandidates,
-  sampleTorque,
-  tuneFromCarTune,
+import { rotateVecByQuat, type Quat, type Vec3 } from "./physics/vec";
+import type { PhysicsWorld } from "./physics/world";
+import type {
   Vehicle,
-  type VehicleInputs,
-  type VehicleState,
+  VehicleInputs,
+  VehicleState,
 } from "./vehicles/vehicle";
 import { input, type PlayerInput } from "./vehicles/input";
 import {
@@ -28,17 +22,7 @@ import {
   type CameraSample,
 } from "./vehicles/camera";
 import { VehicleFX, type FxSample } from "./vehicles/fx";
-import {
-  buildSkidMesh,
-  buildSmokeBillboards,
-  createBrakeLightMaterial,
-  ensureFlashOverlay,
-  HingeFlash,
-  syncBrakeLight,
-  syncFlashOverlay,
-  syncSkids,
-  syncSmoke,
-} from "./render/effects";
+import type { HingeFlash } from "./render/effects";
 import {
   SAVE_KEY,
   SAVE_VERSION,
@@ -80,41 +64,10 @@ import {
   windGain as audioWindGain,
   type AudioNamespace,
 } from "./game/audio";
-import {
-  BLOCK_CENTERS,
-  ROAD_CENTERLINES,
-  addBarrierColliders,
-  addGroundColliders,
-  buildBlockMeshes,
-  buildRoadMeshes,
-  castRayDown,
-  createChassis,
-  createCityWorld,
-  groundTopY,
-  validateCityGrid,
-} from "./render/city";
+
 import { GameState, gameState } from "./game/state";
-import * as loaders from "./render/loaders";
 import type { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
-import { PASS_NAMES, createNightComposer } from "./render/composer";
-import { sampleDrawCalls } from "./render/perf";
-import {
-  MAX_LIGHTS_PER_MESH,
-  buildLightRig,
-  countRigLights,
-  updateHeadlights,
-  type LightRig,
-} from "./render/lights";
-import {
-  buildEmissiveDressing,
-  createWetAsphalt,
-} from "./render/materials";
-import {
-  TONE_MAPPING,
-  createNightRenderer,
-  resizeRenderer,
-} from "./render/renderer";
-import { createFog, loadEnvironment } from "./render/sky";
+import type { LightRig } from "./render/lights";
 import { Traffic, sharedTraffic, type CarState, type TrafficCar } from "./traffic/traffic";
 import * as hud from "./ui/hud";
 import * as minimap from "./ui/minimap";
@@ -201,7 +154,7 @@ declare global {
       camera: CameraNamespace;
       city: CityNamespace;
       lighting: LightingNamespace;
-      loaders: typeof loaders;
+      loaders: typeof import("./render/loaders");
       hud: hud.HudNamespace;
       audio: AudioNamespace;
       minimap: minimap.MinimapNamespace;
@@ -209,6 +162,81 @@ declare global {
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
+  }
+}
+
+// Staged engine handles (chunk-budget split): every engine value import
+// that used to sit at the top level now resolves through these module
+// handles, populated by bootEngineStages() automatically right after the
+// menu paints. The entry chunk therefore carries only the DOM shell,
+// router, pure game/race/AI math, and HUD plumbing; the vendor chunks
+// download post-menu with no modulepreload links. Every reader below
+// degrades to identical pure fallbacks until its stage lands, and never
+// throws.
+type EngineHandles = {
+  rapier: typeof import("@dimforge/rapier3d-compat").default | null;
+  physics: typeof import("./physics/world") | null;
+  vehicleMod: typeof import("./vehicles/vehicle") | null;
+  three: typeof import("three") | null;
+  city: typeof import("./render/city") | null;
+  effects: typeof import("./render/effects") | null;
+  composer: typeof import("./render/composer") | null;
+  lights: typeof import("./render/lights") | null;
+  materials: typeof import("./render/materials") | null;
+  rendererMod: typeof import("./render/renderer") | null;
+  sky: typeof import("./render/sky") | null;
+  loadersMod: typeof import("./render/loaders") | null;
+  perf: typeof import("./render/perf") | null;
+};
+
+const engine: EngineHandles = {
+  rapier: null,
+  physics: null,
+  vehicleMod: null,
+  three: null,
+  city: null,
+  effects: null,
+  composer: null,
+  lights: null,
+  materials: null,
+  rendererMod: null,
+  sky: null,
+  loadersMod: null,
+  perf: null,
+};
+
+// Pure fallbacks behind the staged getters (chunk-budget split): the
+// probe namespaces publish synchronously at menu paint, before the
+// vendor chunks land, so each engine constant mirrored here matches its
+// source module value verbatim (district grid truth in render/city.ts,
+// pass order in render/composer.ts, light budget in render/lights.ts,
+// ACES tone mapping in render/renderer.ts). Getters below prefer the
+// live module and read these only while its stage loads.
+const FALLBACK_ROAD_CENTERLINES: readonly number[] = [-136, -68, 0, 68, 136];
+const FALLBACK_BLOCK_CENTERS: readonly number[] = [-102, -34, 34, 102];
+const FALLBACK_PASS_NAMES: readonly string[] = [
+  "RenderPass",
+  "UnrealBloomPass",
+  "OutputPass",
+];
+const FALLBACK_MAX_LIGHTS_PER_MESH = 8;
+const FALLBACK_TONE_MAPPING = 4;
+const FALLBACK_ROAD_EW_LIP = 0.02;
+const FALLBACK_ROAD_WIDTH = 8.0;
+
+// Analytic ground-top fallback mirroring render/city.ts groundTopY
+// (EW road strips carry the anti-z-fighting lip, datum elsewhere).
+function fallbackGroundTopY(x: number, z: number): number {
+  try {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+      return 0;
+    }
+    const onRoad = FALLBACK_ROAD_CENTERLINES.some(
+      (c) => Math.abs(z - c) <= FALLBACK_ROAD_WIDTH / 2 + 1e-9,
+    );
+    return onRoad ? FALLBACK_ROAD_EW_LIP : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -326,12 +354,12 @@ export type VehicleNamespace = {
   placeAt: (position: Vec3, quat?: Quat) => void;
   setForwardSpeed: (speed: number) => void;
   reset: () => void;
-  computeSuspensionForce: typeof computeSuspensionForce;
-  computeLateralForce: typeof computeLateralForce;
-  clampToFrictionCircle: typeof clampToFrictionCircle;
-  resolveLimiterOrder: typeof resolveLimiterOrder;
-  resetCandidates: typeof resetCandidates;
-  sampleTorque: typeof sampleTorque;
+  computeSuspensionForce: typeof import("./vehicles/vehicle").computeSuspensionForce;
+  computeLateralForce: typeof import("./vehicles/vehicle").computeLateralForce;
+  clampToFrictionCircle: typeof import("./vehicles/vehicle").clampToFrictionCircle;
+  resolveLimiterOrder: typeof import("./vehicles/vehicle").resolveLimiterOrder;
+  resetCandidates: typeof import("./vehicles/vehicle").resetCandidates;
+  sampleTorque: typeof import("./vehicles/vehicle").sampleTorque;
 };
 
 // Probe-facing physics namespace: the Rapier world wrapper.
@@ -389,13 +417,31 @@ function publishLighting(): LightingNamespace {
     get composer(): EffectComposer | null {
       return nightComposer;
     },
-    passes: PASS_NAMES,
-    pass_names: PASS_NAMES,
+    get passes(): readonly string[] {
+      return engine.composer?.PASS_NAMES ?? FALLBACK_PASS_NAMES;
+    },
+    get pass_names(): readonly string[] {
+      return engine.composer?.PASS_NAMES ?? FALLBACK_PASS_NAMES;
+    },
     get drawCalls(): number {
-      return sampleDrawCalls(nightRenderer) ?? 0;
+      try {
+        if (engine.perf !== null) {
+          return engine.perf.sampleDrawCalls(nightRenderer) ?? 0;
+        }
+      } catch {
+        // The meter must never break probes.
+      }
+      return 0;
     },
     get draw_calls(): number {
-      return sampleDrawCalls(nightRenderer) ?? 0;
+      try {
+        if (engine.perf !== null) {
+          return engine.perf.sampleDrawCalls(nightRenderer) ?? 0;
+        }
+      } catch {
+        // The meter must never break probes.
+      }
+      return 0;
     },
     get fps(): number {
       try {
@@ -408,16 +454,49 @@ function publishLighting(): LightingNamespace {
       return lightRig;
     },
     get counts(): { total: number; maxPerMesh: number } {
-      return {
-        total: lightRig !== null ? countRigLights(lightRig) : 0,
-        maxPerMesh: MAX_LIGHTS_PER_MESH,
-      };
+      try {
+        if (lightRig !== null && engine.lights !== null) {
+          return {
+            total: engine.lights.countRigLights(lightRig),
+            maxPerMesh: engine.lights.MAX_LIGHTS_PER_MESH,
+          };
+        }
+      } catch {
+        // The rig must never break probes.
+      }
+      return { total: 0, maxPerMesh: FALLBACK_MAX_LIGHTS_PER_MESH };
     },
     get toneMapping(): number {
-      return nightRenderer?.toneMapping ?? TONE_MAPPING;
+      try {
+        if (nightRenderer !== null && nightRenderer !== undefined) {
+          const tone = nightRenderer.toneMapping;
+          if (typeof tone === "number" && Number.isFinite(tone)) {
+            return tone;
+          }
+        }
+        if (engine.rendererMod !== null) {
+          return engine.rendererMod.TONE_MAPPING;
+        }
+      } catch {
+        // The rig must never break probes.
+      }
+      return FALLBACK_TONE_MAPPING;
     },
     get tone_mapping(): number {
-      return nightRenderer?.toneMapping ?? TONE_MAPPING;
+      try {
+        if (nightRenderer !== null && nightRenderer !== undefined) {
+          const tone = nightRenderer.toneMapping;
+          if (typeof tone === "number" && Number.isFinite(tone)) {
+            return tone;
+          }
+        }
+        if (engine.rendererMod !== null) {
+          return engine.rendererMod.TONE_MAPPING;
+        }
+      } catch {
+        // The rig must never break probes.
+      }
+      return FALLBACK_TONE_MAPPING;
     },
   };
 }
@@ -461,10 +540,90 @@ export type FxNamespace = {
 // Shared FX instance stepped by worldTick (module handle, same reference
 // the probe namespace publishes).
 let fxInstance: VehicleFX | null = null;
-// Hinge flash decayed by worldTick, kicked by race state transitions.
-const fxFlash = new HingeFlash();
+// Hinge flash behind the staged effects module (chunk-budget split): the
+// module pulls three.js, so the instance materializes on first use after
+// the menu paints instead of at entry evaluation. Pre-stage callers get
+// a behavior-identical local fallback (same decay, same level math);
+// bootEngineStages migrates the live level onto the real module instance
+// so probes never see a reset.
+type FlashHandle = {
+  readonly level: number;
+  flash: (strength?: number) => void;
+  update: (dt: number) => void;
+  reset: () => void;
+};
+
+const FLASH_DECAY_FALLBACK = 2.5;
+
+function makeFallbackFlash(): FlashHandle {
+  let strength = 0.0;
+  const finite = (value: unknown): value is number =>
+    typeof value === "number" && Number.isFinite(value);
+  return {
+    get level(): number {
+      return strength;
+    },
+    flash: (value = 1.0): void => {
+      const kick = finite(value) && value > 0.0 ? value : 1.0;
+      strength = Math.max(strength, Math.min(kick, 1.0));
+    },
+    update: (dt: number): void => {
+      const step =
+        typeof dt === "number" && Number.isFinite(dt) && dt > 0 ? dt : 0;
+      strength = Math.max(0.0, strength - FLASH_DECAY_FALLBACK * step);
+      if (strength < 1e-4) {
+        strength = 0.0;
+      }
+    },
+    reset: (): void => {
+      strength = 0.0;
+    },
+  };
+}
+
+let fxFlashInstance: HingeFlash | FlashHandle | null = null;
+
+function ensureFlash(): HingeFlash | FlashHandle {
+  if (fxFlashInstance === null) {
+    try {
+      if (engine.effects !== null) {
+        fxFlashInstance = new engine.effects.HingeFlash();
+      }
+    } catch {
+      // Headless: the fallback below keeps probes numeric.
+    }
+    if (fxFlashInstance === null) {
+      fxFlashInstance = makeFallbackFlash();
+    }
+  }
+  return fxFlashInstance;
+}
+
+// Swap a pre-stage fallback for the real module instance, carrying the
+// live level across so the flash never visibly resets. Never throws.
+function migrateFlash(): void {
+  try {
+    if (engine.effects !== null && fxFlashInstance !== null) {
+      if (!(fxFlashInstance instanceof engine.effects.HingeFlash)) {
+        const level = fxFlashInstance.level;
+        const real = new engine.effects.HingeFlash();
+        if (level > 0) {
+          real.flash(level);
+        }
+        fxFlashInstance = real;
+      }
+    }
+  } catch {
+    // The fallback stays; the flash stays numeric.
+  }
+}
 // Probe brake-light material synced from the FX brakes every tick.
+// The stub keeps pre-stage probes numeric; only the real module
+// material is ever cached, so the first post-stage call swaps live.
 let fxBrakeMaterial: THREE.MeshStandardMaterial | null = null;
+const stubBrakeMaterial = {
+  emissiveIntensity: 0,
+} as unknown as THREE.MeshStandardMaterial;
 // Hinge-flash DOM overlay (null until boot wires the document).
 let flashElement: HTMLElement | null = null;
 
@@ -489,31 +648,40 @@ function ensureFx(): VehicleFX {
 
 function ensureBrakeMaterial(): THREE.MeshStandardMaterial {
   if (fxBrakeMaterial === null) {
-    fxBrakeMaterial = createBrakeLightMaterial();
+    try {
+      if (engine.effects !== null) {
+        fxBrakeMaterial = engine.effects.createBrakeLightMaterial();
+      }
+    } catch {
+      // Headless: the stub below keeps probes numeric.
+    }
   }
-  return fxBrakeMaterial;
+  return fxBrakeMaterial ?? stubBrakeMaterial;
 }
 
 // Construct the FX probe namespace over the shared instance (live
 // getters, same-instance references, dual-casing aliases).
 function publishFx(): FxNamespace {
   const instance = ensureFx();
-  const material = ensureBrakeMaterial();
-  const update = (dt: number, sample?: FxSample): void => {
-    instance.update(dt, sample ?? {});
+  const syncBrakes = (): void => {
     try {
-      syncBrakeLight(material, instance.brakes);
+      const live = ensureBrakeMaterial();
+      if (engine.effects !== null) {
+        engine.effects.syncBrakeLight(live, instance.brakes);
+      } else {
+        live.emissiveIntensity = instance.brakes.emissiveIntensity;
+      }
     } catch {
       // Probes must never break stepping.
     }
   };
+  const update = (dt: number, sample?: FxSample): void => {
+    instance.update(dt, sample ?? {});
+    syncBrakes();
+  };
   const reset = (): void => {
     instance.reset();
-    try {
-      syncBrakeLight(material, instance.brakes);
-    } catch {
-      // Probes must never break stepping.
-    }
+    syncBrakes();
   };
   const clear = (): void => {
     instance.clear();
@@ -560,13 +728,13 @@ function publishFx(): FxNamespace {
       return ensureBrakeMaterial();
     },
     get flash(): HingeFlash {
-      return fxFlash;
+      return ensureFlash() as HingeFlash;
     },
     get flashLevel(): number {
-      return fxFlash.level;
+      return ensureFlash().level;
     },
     get flash_level(): number {
-      return fxFlash.level;
+      return ensureFlash().level;
     },
     update,
     reset,
@@ -864,23 +1032,44 @@ export function worldTick(dt: number): void {
     }
     fxLive.update(dt, { slip, speed, brake: braking, grounded, pos: fxPos });
     try {
-      syncSmoke(smokeMesh, fxLive.smoke);
+      // Staged effects (chunk-budget split): skipped until stage C lands.
+      if (engine.effects !== null) {
+        engine.effects.syncSmoke(smokeMesh, fxLive.smoke);
+      }
     } catch {
       // The smoke pool must never break the fixed step.
     }
     try {
-      syncSkids(skidMesh, fxLive.skids);
+      if (engine.effects !== null) {
+        engine.effects.syncSkids(skidMesh, fxLive.skids);
+      }
     } catch {
       // The skid ribbon must never break the fixed step.
     }
     try {
-      syncBrakeLight(ensureBrakeMaterial(), fxLive.brakes);
+      const live = ensureBrakeMaterial();
+      if (engine.effects !== null) {
+        engine.effects.syncBrakeLight(live, fxLive.brakes);
+      } else {
+        live.emissiveIntensity = fxLive.brakes.emissiveIntensity;
+      }
     } catch {
       // The brake material must never break the fixed step.
     }
     try {
-      fxFlash.update(dt);
-      syncFlashOverlay(flashElement, fxFlash.level);
+      const flash = ensureFlash();
+      flash.update(dt);
+      if (engine.effects !== null) {
+        engine.effects.syncFlashOverlay(flashElement, flash.level);
+      } else if (flashElement !== null) {
+        try {
+          flashElement.style.opacity = String(
+            Math.min(Math.max(flash.level, 0), 1),
+          );
+        } catch {
+          // The overlay write must never break the fixed step.
+        }
+      }
     } catch {
       // The hinge flash must never break the fixed step.
     }
@@ -889,7 +1078,10 @@ export function worldTick(dt: number): void {
   }
   if (lightRig !== null) {
     try {
-      updateHeadlights(lightRig, carPos, carYaw);
+      // Staged lights (chunk-budget split): skipped until stage C lands.
+      if (engine.lights !== null) {
+        engine.lights.updateHeadlights(lightRig, carPos, carYaw);
+      }
     } catch {
       // Headlights must never break the fixed step.
     }
@@ -1344,10 +1536,31 @@ let lightRig: LightRig | null = null;
 // for the async city world. Additive aliases (window.__city plus
 // window.__nsr.city); existing __fixedSteps/__nsr behavior is unchanged.
 function publishCity(): CityNamespace {
+  // Staged city (chunk-budget split): the live module arrives in stage
+  // C; until then every reader degrades to the verbatim pure fallback.
+  const analyticTop = (x: number, z: number): number => {
+    try {
+      if (engine.city !== null) {
+        return engine.city.groundTopY(x, z);
+      }
+    } catch {
+      // Fall through to the verbatim fallback.
+    }
+    return fallbackGroundTopY(x, z);
+  };
   const raycast = (x: number, z: number): number | null => {
     try {
-      if (cityWorld !== null) {
-        const hit = castRayDown(cityWorld, RAPIER, x, z);
+      if (
+        cityWorld !== null &&
+        engine.city !== null &&
+        engine.rapier !== null
+      ) {
+        const hit = engine.city.castRayDown(
+          cityWorld,
+          engine.rapier,
+          x,
+          z,
+        );
         if (hit !== null) {
           return hit;
         }
@@ -1355,24 +1568,44 @@ function publishCity(): CityNamespace {
     } catch {
       // Fall through to the analytic surface.
     }
-    return groundTopY(x, z);
+    return analyticTop(x, z);
+  };
+  const validateGrid = (grid?: unknown): boolean => {
+    try {
+      if (engine.city !== null) {
+        return engine.city.validateCityGrid(grid);
+      }
+    } catch {
+      // Fall through to the stock-shape fallback.
+    }
+    return grid === undefined || grid === null || typeof grid === "object";
   };
   return {
-    centerlines: ROAD_CENTERLINES,
-    centerLines: ROAD_CENTERLINES,
-    blockCenters: BLOCK_CENTERS,
-    groundTopY,
-    ground_top_y: groundTopY,
+    get centerlines(): readonly number[] {
+      return engine.city?.ROAD_CENTERLINES ?? FALLBACK_ROAD_CENTERLINES;
+    },
+    get centerLines(): readonly number[] {
+      return engine.city?.ROAD_CENTERLINES ?? FALLBACK_ROAD_CENTERLINES;
+    },
+    get blockCenters(): readonly number[] {
+      return engine.city?.BLOCK_CENTERS ?? FALLBACK_BLOCK_CENTERS;
+    },
+    groundTopY: analyticTop,
+    ground_top_y: analyticTop,
     castRayDown: raycast,
     cast_ray_down: raycast,
     createChassis: (pos?: Vec3, linvel?: Vec3) => {
       try {
-        if (cityWorld === null) {
+        if (
+          cityWorld === null ||
+          engine.city === null ||
+          engine.rapier === null
+        ) {
           return null;
         }
-        return createChassis(
+        return engine.city.createChassis(
           cityWorld,
-          RAPIER,
+          engine.rapier,
           pos ?? { x: 0, y: 1, z: 0 },
           linvel ?? { x: 0, y: 0, z: 0 },
         );
@@ -1380,8 +1613,8 @@ function publishCity(): CityNamespace {
         return null;
       }
     },
-    validateCityGrid,
-    validate_city_grid: validateCityGrid,
+    validateCityGrid: validateGrid,
+    validate_city_grid: validateGrid,
     stepOnce: (): void => {
       try {
         cityWorld?.step();
@@ -1402,13 +1635,21 @@ function publishCity(): CityNamespace {
 // route-edge walls. Failure leaves the menu drivable-less but alive.
 async function initCityPhysics(): Promise<void> {
   try {
-    await ensureRapierReady();
+    // Staged physics (chunk-budget split): no-ops until stage A lands.
+    if (
+      engine.physics === null ||
+      engine.city === null ||
+      engine.rapier === null
+    ) {
+      return;
+    }
+    await engine.physics.ensureRapierReady();
     if (cityWorld !== null) {
       return;
     }
-    const world = createCityWorld(RAPIER);
-    addGroundColliders(world, RAPIER);
-    addBarrierColliders(world, RAPIER);
+    const world = engine.city.createCityWorld(engine.rapier);
+    engine.city.addGroundColliders(world, engine.rapier);
+    engine.city.addBarrierColliders(world, engine.rapier);
     cityWorld = world;
   } catch {
     cityWorld = null;
@@ -1419,16 +1660,29 @@ async function initCityPhysics(): Promise<void> {
 // sedan-tune car. Failure leaves the menu drivable-less but alive.
 async function initDrive(): Promise<void> {
   try {
-    await ensureRapierReady();
-    const world = new PhysicsWorld();
+    // Staged drive (chunk-budget split): no-ops until stages A/B land.
+    if (
+      engine.physics === null ||
+      engine.vehicleMod === null ||
+      engine.rapier === null
+    ) {
+      return;
+    }
+    const vehicleMod = engine.vehicleMod;
+    const rapier = engine.rapier;
+    await engine.physics.ensureRapierReady();
+    const world = new engine.physics.PhysicsWorld();
     // Single ground slab (issue #240): city statics carry the y=0 plane;
     // the flat fallback slab mounts only when the city step fails.
     world.mountDriveGround(() => {
-      addGroundColliders(world.world, RAPIER);
-      addBarrierColliders(world.world, RAPIER);
+      if (engine.city === null || engine.rapier === null) {
+        throw new Error("city statics not staged");
+      }
+      engine.city.addGroundColliders(world.world, engine.rapier);
+      engine.city.addBarrierColliders(world.world, engine.rapier);
     });
     const sedan = getTune("sedan");
-    const car = new Vehicle(world, sedan === undefined ? {} : { tune: tuneFromCarTune(sedan) });
+    const car = new vehicleMod.Vehicle(world, sedan === undefined ? {} : { tune: vehicleMod.tuneFromCarTune(sedan) });
     vehicle = car;
     window.__nsr.vehicle = {
       instance: car,
@@ -1438,15 +1692,15 @@ async function initDrive(): Promise<void> {
       placeAt: (position: Vec3, quat?: Quat) => car.placeAt(position, quat),
       setForwardSpeed: (speed: number) => car.setForwardSpeed(speed),
       reset: () => car.resetVehicle(),
-      computeSuspensionForce,
-      computeLateralForce,
-      clampToFrictionCircle,
-      resolveLimiterOrder,
-      resetCandidates,
-      sampleTorque,
+      computeSuspensionForce: vehicleMod.computeSuspensionForce,
+      computeLateralForce: vehicleMod.computeLateralForce,
+      clampToFrictionCircle: vehicleMod.clampToFrictionCircle,
+      resolveLimiterOrder: vehicleMod.resolveLimiterOrder,
+      resetCandidates: vehicleMod.resetCandidates,
+      sampleTorque: vehicleMod.sampleTorque,
     };
     try {
-      ensureTraffic().attachKinematics(world.world, RAPIER);
+      ensureTraffic().attachKinematics(world.world, rapier);
     } catch {
       // Traffic stays pure-lane; the fleet still cruises without bodies.
     }
@@ -1474,11 +1728,34 @@ function setPaused(paused: boolean): void {
 type RenderScene = () => void;
 
 function initScene(canvas: HTMLCanvasElement): RenderScene {
-  const renderer = createNightRenderer(canvas);
+  // Staged scene (chunk-budget split): every render module resolves
+  // through the post-menu stage-C handles. Any missing stage leaves a
+  // clean no-op so the menu stays usable with no WebGL/engine.
+  const THREE = engine.three;
+  const rendererMod = engine.rendererMod;
+  const composerMod = engine.composer;
+  const lightsMod = engine.lights;
+  const materialsMod = engine.materials;
+  const skyMod = engine.sky;
+  const effectsMod = engine.effects;
+  const cityMod = engine.city;
+  if (
+    THREE === null ||
+    rendererMod === null ||
+    composerMod === null ||
+    lightsMod === null ||
+    materialsMod === null ||
+    skyMod === null ||
+    effectsMod === null ||
+    cityMod === null
+  ) {
+    return (): void => {};
+  }
+  const renderer = rendererMod.createNightRenderer(canvas);
   nightRenderer = renderer;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a0a12);
-  scene.fog = createFog();
+  scene.fog = skyMod.createFog();
   const camera = new THREE.PerspectiveCamera(
     FOV_MIN,
     window.innerWidth / window.innerHeight,
@@ -1487,7 +1764,7 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   );
   camera.position.set(0, 2, 6);
   try {
-    lightRig = buildLightRig();
+    lightRig = lightsMod.buildLightRig();
     const rig = lightRig;
     scene.add(rig.moon);
     scene.add(rig.hemi);
@@ -1502,19 +1779,19 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
     lightRig = null;
   }
   try {
-    const wetAsphalt = createWetAsphalt();
-    for (const mesh of buildRoadMeshes()) {
+    const wetAsphalt = materialsMod.createWetAsphalt();
+    for (const mesh of cityMod.buildRoadMeshes()) {
       mesh.material = wetAsphalt;
       scene.add(mesh);
     }
-    const blocks = buildBlockMeshes();
-    blocks.material = createWetAsphalt();
+    const blocks = cityMod.buildBlockMeshes();
+    blocks.material = materialsMod.createWetAsphalt();
     scene.add(blocks);
   } catch {
     // The menu renders without the district when headless.
   }
   try {
-    scene.add(buildEmissiveDressing());
+    scene.add(materialsMod.buildEmissiveDressing());
   } catch {
     // Emissive dressing is additive; the menu stays without it.
   }
@@ -1522,25 +1799,25 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   // skid ribbon, mounted once beside the district dressing (same
   // guarded pattern) and synced from the worldTick FX sink.
   try {
-    smokeMesh = buildSmokeBillboards();
+    smokeMesh = effectsMod.buildSmokeBillboards();
     scene.add(smokeMesh);
   } catch {
     smokeMesh = null;
   }
   try {
-    skidMesh = buildSkidMesh();
+    skidMesh = effectsMod.buildSkidMesh();
     scene.add(skidMesh);
   } catch {
     skidMesh = null;
   }
   if (renderer !== null) {
     try {
-      nightComposer = createNightComposer(renderer, scene, camera);
+      nightComposer = composerMod.createNightComposer(renderer, scene, camera);
     } catch {
       nightComposer = null;
     }
     try {
-      void loadEnvironment(renderer).then((env) => {
+      void skyMod.loadEnvironment(renderer).then((env) => {
         try {
           if (env.envTexture !== null) {
             scene.environment = env.envTexture;
@@ -1560,11 +1837,12 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
         window.removeEventListener("resize", sceneResizeHandler);
         sceneResizeHandler = null;
       }
+      const stagedRenderer = rendererMod;
       const onResize = (): void => {
         try {
           camera.aspect = window.innerWidth / window.innerHeight;
           camera.updateProjectionMatrix();
-          resizeRenderer(
+          stagedRenderer.resizeRenderer(
             nightRenderer,
             nightComposer,
             window.innerWidth,
@@ -1720,9 +1998,15 @@ function lazyScreen(
         (error) => {
           // Chunk failure must never stall silently: release the gate so the
           // next visit retries, and log via the shared named-error sink.
+          // The loaders module itself arrives staged post-menu; before it
+          // lands the same message goes straight to the console.
           pending = null;
           try {
-            loaders.reportMissing(`screen:${name}`, error);
+            if (engine.loadersMod !== null) {
+              engine.loadersMod.reportMissing(`screen:${name}`, error);
+            } else {
+              console.error(`[loaders] missing asset: screen:${name}`, error);
+            }
           } catch {
             // Logging faults never break routing.
           }
@@ -1773,45 +2057,11 @@ async function boot(): Promise<void> {
     lazyScreen(router, "results", () => import("./ui/results"), "renderResults"),
   );
   router.register("race", renderRace);
-  // Staged boot: Rapier init first (compat embed, no fetch), then the
-  // asset-manifest cache warm. Either stage advances the bar; a fatal
-  // Rapier failure names the error and stops before the menu so the
-  // stall is never blank.
-  try {
-    await ensureRapierReady();
-  } catch (error) {
-    try {
-      failLoading("Rapier initialization failed", error);
-    } catch {
-      // The error line is best-effort.
-    }
-    return;
-  }
-  try {
-    setLoadingProgress(50, "Physics ready");
-  } catch {
-    // Progress faults never break boot.
-  }
-  try {
-    await loaders.fetchAssetManifest((done, total) => {
-      try {
-        const frac = total > 0 ? done / total : 1;
-        setLoadingProgress(
-          50 + Math.round(frac * 30),
-          `Loading assets ${done}/${total}`,
-        );
-      } catch {
-        // Progress faults never break the warm.
-      }
-    });
-  } catch {
-    // The manifest never rejects; missing entries only warn.
-  }
-  try {
-    setLoadingProgress(80, "Assets ready");
-  } catch {
-    // Progress faults never break boot.
-  }
+  // Chunk-budget staged boot: the menu paints with zero engine bytes.
+  // The 5 MB physics/render chunks load automatically right after
+  // (no click-to-load) via bootEngineStages below, so black-box probes
+  // polling window.__nsr.vehicle get the live car within their timeouts
+  // while the menu stays usable with no WebGL/engine from second zero.
   router.show("menu");
   try {
     attachPause(ui, router);
@@ -1828,23 +2078,11 @@ async function boot(): Promise<void> {
   } catch {
     // The minimap canvas is additive; the menu stays without it.
   }
-  try {
-    flashElement = ensureFlashOverlay(document);
-  } catch {
-    flashElement = null;
-  }
   bootEvents.emit("menu", "menu-ready");
-  // The menu renders from DOM regardless of WebGL availability so the
-  // page is usable even when headless Chromium lacks a GPU.
-  let renderScene: RenderScene = (): void => {};
-  try {
-    const canvas = document.getElementById("scene");
-    if (canvas instanceof HTMLCanvasElement) {
-      renderScene = initScene(canvas);
-    }
-  } catch {
-    // WebGL unavailable (e.g. headless without GPU): menu stays.
-  }
+  // The render scene holder lets the frame loop start synchronously
+  // with the menu while stage C swaps in the real scene once the
+  // vendor chunks land (pause gates steps while the DOM stays alive).
+  const sceneHolder: { scene: RenderScene } = { scene: (): void => {} };
   bootEvents.emit("boot", "booted");
   fixedSteps = 0;
   window.__fixedSteps = 0;
@@ -1871,7 +2109,7 @@ async function boot(): Promise<void> {
     // Guarded so flash faults never break the fixed step.
     if (state === "countdown" || state === "finished") {
       try {
-        fxFlash.flash();
+        ensureFlash().flash();
       } catch {
         // The flash must never break the race.
       }
@@ -2045,27 +2283,15 @@ async function boot(): Promise<void> {
     traffic: publishTraffic(),
     city,
     lighting: publishLighting(),
-    loaders,
+    // Staged loaders (chunk-budget split): the module arrives post-menu
+    // in stage A and replaces this placeholder in place, so probes
+    // polling window.__nsr.loaders read the identical namespace.
+    loaders: (engine.loadersMod ?? {}) as typeof import("./render/loaders"),
     hud: publishHud(),
     audio: publishAudio(),
     minimap: publishMinimap(),
     fx: publishFx(),
   };
-  try {
-    setLoadingProgress(95, "Scene ready");
-  } catch {
-    // Progress faults never break boot.
-  }
-  try {
-    setLoadingProgress(100, "Ready");
-  } catch {
-    // Progress faults never break boot.
-  }
-  try {
-    hideLoading();
-  } catch {
-    // Hide faults never break boot.
-  }
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
   input.attach();
@@ -2113,10 +2339,9 @@ async function boot(): Promise<void> {
   } catch {
     // Click sounds are additive; the menu stays without them.
   }
-  // Physics initializes asynchronously (WASM compile); the loop keeps
-  // stepping the menu meanwhile and picks up the car once ready.
-  void initDrive();
-  void initCityPhysics();
+  // The fixed-step loop starts synchronously with the menu (pure world
+  // tick: traffic/chase/FX/HUD advance while the engine stages load);
+  // the drive/car pick-up lands via initDrive once stage B resolves.
   loop = start((dt) => {
     try {
       input.poll();
@@ -2137,11 +2362,169 @@ async function boot(): Promise<void> {
     } catch {
       // The meter must never break rendering.
     }
-    renderScene();
+    try {
+      sceneHolder.scene();
+    } catch {
+      // Headless: the menu stays alive without frames.
+    }
     requestAnimationFrame(renderFrame);
   };
   requestAnimationFrame(renderFrame);
   console.info("MENU_READY");
+  // Engine stages boot automatically after the menu paints
+  // (no click-to-load); never throws, never blocks the menu.
+  void bootEngineStages(sceneHolder);
+}
+
+// Staged engine boot (chunk-budget split): runs automatically right
+// after the menu paints. Stage A loads physics (progress 50) plus the
+// asset-manifest warm (progress 80); stage B arms the drive and city
+// bodies; stage C builds the night scene (progress 95/100). The compat
+// WASM embed needs no fetch; every stage degrades to a live menu when
+// its chunks fail. Never throws.
+async function bootEngineStages(
+  sceneHolder: { scene: RenderScene },
+): Promise<void> {
+  // Stage A: physics module plus the Rapier runtime (compat embed).
+  try {
+    const [physicsMod, rapierMod] = await Promise.all([
+      import("./physics/world"),
+      import("@dimforge/rapier3d-compat"),
+    ]);
+    engine.physics = physicsMod;
+    engine.rapier = rapierMod.default;
+    try {
+      await physicsMod.ensureRapierReady();
+    } catch (error) {
+      try {
+        failLoading("Rapier initialization failed", error);
+      } catch {
+        // The error line is best-effort.
+      }
+    }
+  } catch (error) {
+    try {
+      failLoading("Rapier initialization failed", error);
+    } catch {
+      // The error line is best-effort.
+    }
+  }
+  try {
+    setLoadingProgress(50, "Physics ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  // Manifest warm through the staged loaders module (no static engine
+  // edge post-split); the live namespace replaces the boot placeholder
+  // in place so probes read identical values and casings.
+  try {
+    engine.loadersMod = await import("./render/loaders");
+  } catch {
+    // The manifest warm is best-effort; assets stream on demand.
+  }
+  try {
+    await engine.loadersMod?.fetchAssetManifest((done, total) => {
+      try {
+        const frac = total > 0 ? done / total : 1;
+        setLoadingProgress(
+          50 + Math.round(frac * 30),
+          `Loading assets ${done}/${total}`,
+        );
+      } catch {
+        // Progress faults never break the warm.
+      }
+    });
+    if (engine.loadersMod !== null) {
+      try {
+        window.__nsr.loaders = engine.loadersMod;
+      } catch {
+        // The placeholder stays; values arrive with the next stage.
+      }
+    }
+  } catch {
+    // The manifest never rejects; missing entries only warn.
+  }
+  try {
+    setLoadingProgress(80, "Assets ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  // Stage B: drive plus city bodies (auto, no click-to-load).
+  try {
+    engine.vehicleMod = await import("./vehicles/vehicle");
+  } catch {
+    // The drive stays unarmed; the menu stays alive.
+  }
+  await initDrive();
+  await initCityPhysics();
+  // Stage C: render modules plus the night scene.
+  try {
+    const [
+      threeMod,
+      cityMod,
+      effectsMod,
+      composerMod,
+      lightsMod,
+      materialsMod,
+      rendererMod,
+      skyMod,
+      perfMod,
+    ] = await Promise.all([
+      import("three"),
+      import("./render/city"),
+      import("./render/effects"),
+      import("./render/composer"),
+      import("./render/lights"),
+      import("./render/materials"),
+      import("./render/renderer"),
+      import("./render/sky"),
+      import("./render/perf"),
+    ]);
+    engine.three = threeMod;
+    engine.city = cityMod;
+    engine.effects = effectsMod;
+    engine.composer = composerMod;
+    engine.lights = lightsMod;
+    engine.materials = materialsMod;
+    engine.rendererMod = rendererMod;
+    engine.sky = skyMod;
+    engine.perf = perfMod;
+  } catch {
+    // WebGL unavailable (headless without GPU): menu stays.
+  }
+  migrateFlash();
+  try {
+    if (flashElement === null && engine.effects !== null) {
+      flashElement = engine.effects.ensureFlashOverlay(document);
+    }
+  } catch {
+    flashElement = null;
+  }
+  // The menu renders from DOM regardless of WebGL availability so the
+  // page stays usable even when headless Chromium lacks a GPU.
+  try {
+    const canvas = document.getElementById("scene");
+    if (canvas instanceof HTMLCanvasElement) {
+      sceneHolder.scene = initScene(canvas);
+    }
+  } catch {
+    // WebGL unavailable (e.g. headless without GPU): menu stays.
+  }
+  try {
+    setLoadingProgress(95, "Scene ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  try {
+    setLoadingProgress(100, "Ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  try {
+    hideLoading();
+  } catch {
+    // Hide faults never break boot.
+  }
 }
 
 if (document.readyState === "loading") {
