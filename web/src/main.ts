@@ -1421,20 +1421,12 @@ async function initDrive(): Promise<void> {
   try {
     await ensureRapierReady();
     const world = new PhysicsWorld();
-    // Single ground slab (issue #229): the city statics carry the y=0
-    // plane when they land, so the flat fallback slab mounts only when
-    // the city step fails — never a coplanar double slab at y=0.
-    let cityStaticsOk = false;
-    try {
+    // Single ground slab (issue #240): city statics carry the y=0 plane;
+    // the flat fallback slab mounts only when the city step fails.
+    world.mountDriveGround(() => {
       addGroundColliders(world.world, RAPIER);
       addBarrierColliders(world.world, RAPIER);
-      cityStaticsOk = true;
-    } catch {
-      // City statics are additive; the flat slab still drives.
-    }
-    if (!cityStaticsOk) {
-      world.makeGround();
-    }
+    });
     const sedan = getTune("sedan");
     const car = new Vehicle(world, sedan === undefined ? {} : { tune: tuneFromCarTune(sedan) });
     vehicle = car;

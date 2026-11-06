@@ -160,6 +160,19 @@ export class PhysicsWorld {
     this.groundCreated = true;
   }
 
+  // Single drive-ground mount (issue #240): the city statics carry the
+  // y = 0 plane when they land, so the flat fallback slab mounts only
+  // when the city step throws — never a coplanar double slab at y = 0.
+  mountDriveGround(tryCityStatics: () => void): boolean {
+    try {
+      tryCityStatics();
+      return true;
+    } catch {
+      this.makeGround();
+      return false;
+    }
+  }
+
   // Dynamic chassis rigid body with a cuboid collider in exact
   // vehicle_base.tscn geometry (~half-extents 0.9/0.25/2.1, shape
   // offset +0.25 y) and a 1200 kg mass. The center of mass is
