@@ -96,6 +96,41 @@
         height: 20px;
         margin: 8px auto;
       }
+      #ui .car-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(180px, 1fr));
+        gap: 12px;
+        margin: 12px auto;
+        max-width: 560px;
+      }
+      #ui .car-card {
+        background: rgba(20, 20, 32, 0.9);
+        border: 1px solid #444;
+        border-radius: 8px;
+        padding: 12px;
+        text-align: center;
+      }
+      #ui .car-preview {
+        width: 120px;
+        height: 72px;
+        display: block;
+        margin: 8px auto;
+        background: #05050c;
+        border: 1px solid #333;
+        border-radius: 6px;
+      }
+      #ui .swatch-row {
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+        margin: 12px auto;
+      }
+      #ui .swatch-row button {
+        width: 56px;
+        margin: 0;
+        padding: 8px 0;
+        font-size: 12px;
+      }
       #screen-pause {
         position: fixed;
         inset: 0;

@@ -255,8 +255,8 @@ describe("garage screen", () => {
   it("leaves the sedan open while the coupe boots locked", () => {
     const { element, stub } = makeContainer(doc);
     renderGarage(element, null);
-    const sedan = findById(stub, "btn-car-sedan");
-    const coupe = findById(stub, "btn-car-coupe");
+    const sedan = findById(stub, "btn-select-sedan");
+    const coupe = findById(stub, "btn-select-coupe");
     expect(sedan?.disabled).toBe(false);
     expect(textOf(sedan)).not.toContain("Locked");
     expect(coupe?.disabled).toBe(true);
@@ -266,7 +266,7 @@ describe("garage screen", () => {
   it("persists car and color picks through the game state", () => {
     const { element, stub } = makeContainer(doc);
     renderGarage(element, null);
-    findById(stub, "btn-car-sedan")?.click();
+    findById(stub, "btn-select-sedan")?.click();
     expect(gameState.getSelectedCar()).toBe("sedan");
     findById(stub, "btn-color-2")?.click();
     expect(gameState.getSelectedColor()).toBe(2);
