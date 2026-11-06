@@ -4,6 +4,7 @@
 // constants stay Node-safe. Never throws: without WebGL it returns
 // null and the caller keeps the menu alive.
 import * as THREE from "three";
+import { BLOOM_RES_DIVISOR } from "./composer";
 
 // Filmic highlight rolloff for the emissive-first night look.
 export const TONE_MAPPING = THREE.ACESFilmicToneMapping;
@@ -61,8 +62,14 @@ export function createNightRenderer(
 // Godot-name alias so harness wording cannot mismatch (same reference).
 export const create_night_renderer = createNightRenderer;
 
+export type ResizablePass = {
+  name?: unknown;
+  setSize?: (width: number, height: number) => void;
+};
+
 export type ResizableComposer = {
   setSize(width: number, height: number): void;
+  passes?: ResizablePass[];
 };
 
 // Resize helper for the renderer/composer pair. Never throws; nulls
@@ -83,6 +90,31 @@ export function resizeRenderer(
     }
     renderer?.setSize(width, height);
     composer?.setSize(width, height);
+    // Half-res bloom stays half-res across resizes (issue #228): the
+    // composer propagates the fullscreen size to every pass, so the
+    // bloom pass is re-halved through BLOOM_RES_DIVISOR right after.
+    // Only the name-marked UnrealBloomPass is touched; render/output
+    // passes keep the fullscreen size.
+    try {
+      const passes = composer?.passes;
+      if (Array.isArray(passes)) {
+        const halfWidth = Math.max(
+          1,
+          Math.floor(width / BLOOM_RES_DIVISOR),
+        );
+        const halfHeight = Math.max(
+          1,
+          Math.floor(height / BLOOM_RES_DIVISOR),
+        );
+        for (const pass of passes) {
+          if (pass?.name === "UnrealBloomPass") {
+            pass.setSize?.(halfWidth, halfHeight);
+          }
+        }
+      }
+    } catch {
+      // Bloom re-halving is best-effort; the fullscreen size stands.
+    }
   } catch {
     // Resizes must never break rendering.
   }

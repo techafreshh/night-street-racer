@@ -16,6 +16,13 @@ export const BLOOM_STRENGTH = 0.65;
 // Tight glow around the sign and window bands.
 export const BLOOM_RADIUS = 0.4;
 
+// Bloom resolution divisor (issue #228): the UnrealBloomPass is built
+// and kept at 1 / BLOOM_RES_DIVISOR of the fullscreen size, so the
+// blur mip chain costs a quarter of the fullscreen pixels. Full-res
+// bloom plus CSS downscale is rejected: only a smaller bloom target
+// reduces real GPU cost.
+export const BLOOM_RES_DIVISOR = 2;
+
 // Canonical pass order; the probe reads this alongside the live
 // composer passes.
 export const PASS_NAMES: readonly string[] = [
@@ -29,6 +36,7 @@ export const bloom_threshold = BLOOM_THRESHOLD;
 export const BLOOM_LIMIT = BLOOM_THRESHOLD;
 export const bloom_strength = BLOOM_STRENGTH;
 export const bloom_radius = BLOOM_RADIUS;
+export const bloom_res_divisor = BLOOM_RES_DIVISOR;
 export const pass_names = PASS_NAMES;
 
 function isFiniteNumber(value: unknown): value is number {
@@ -55,14 +63,20 @@ export function createNightComposer(
     }
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    const size = new THREE.Vector2(800, 600);
+    const full = new THREE.Vector2(800, 600);
     try {
-      renderer.getSize(size);
+      renderer.getSize(full);
     } catch {
       // Fall back to the default resolution.
     }
+    // Half-res bloom target: the divisor keeps the blur cost down
+    // while the render/output passes stay fullscreen.
+    const half = new THREE.Vector2(
+      Math.max(1, Math.floor(full.x / BLOOM_RES_DIVISOR)),
+      Math.max(1, Math.floor(full.y / BLOOM_RES_DIVISOR)),
+    );
     const bloom = new UnrealBloomPass(
-      size,
+      half,
       BLOOM_STRENGTH,
       BLOOM_RADIUS,
       BLOOM_THRESHOLD,
@@ -115,6 +129,10 @@ function checkComposer(config: Record<string, unknown>): boolean {
     config.radius ?? config.BLOOM_RADIUS ?? config.bloom_radius,
     BLOOM_RADIUS,
   );
+  const divisor = pick(
+    config.divisor ?? config.BLOOM_RES_DIVISOR ?? config.bloom_res_divisor,
+    BLOOM_RES_DIVISOR,
+  );
   return (
     threshold === BLOOM_THRESHOLD &&
     threshold >= 1.0 &&
@@ -123,6 +141,7 @@ function checkComposer(config: Record<string, unknown>): boolean {
     strength <= 1.5 &&
     radius === BLOOM_RADIUS &&
     radius >= 0 &&
-    radius <= 1
+    radius <= 1 &&
+    divisor === BLOOM_RES_DIVISOR
   );
 }
