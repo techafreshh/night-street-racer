@@ -11,7 +11,9 @@ let rapierInit: Promise<void> | null = null;
 // shared promise keeps concurrent boot callers (drive plus city) from
 // starting two in-flight inits, which corrupts WASM memory. A rejected
 // init resets the handle before rethrowing so the next call retries
-// instead of poisoning the session on the cached rejection.
+// instead of poisoning the session on the cached rejection. Both the
+// leader and the followers reset only their own failed attempt, so a
+// stale waiter never clears a fresh retry.
 export async function ensureRapierReady(): Promise<void> {
   if (rapierInit === null) {
     const pending = RAPIER.init();
@@ -26,10 +28,13 @@ export async function ensureRapierReady(): Promise<void> {
     }
     return;
   }
+  const current = rapierInit;
   try {
-    await rapierInit;
+    await current;
   } catch (error) {
-    rapierInit = null;
+    if (rapierInit === current) {
+      rapierInit = null;
+    }
     throw error;
   }
 }
