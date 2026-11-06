@@ -1,15 +1,24 @@
 // Pure-pursuit AI bridge ported from scripts/ai/ai_input.gd.
-// Pure zero-dependency module: no imports, no DOM, no 3D engine — the fixed
-// step and vitest load it directly. Steering pursues a speed-scaled
-// lookahead point; throttle/brake track the baked curvature target speed.
-// The output matches the VehicleInputs seam (throttle/brake/steer plus the
+// Engine-free module: no DOM, no 3D engine — the fixed step and vitest
+// load it directly. Steering pursues a speed-scaled lookahead point;
+// throttle/brake track the baked curvature target speed. The output
+// matches the VehicleInputs seam (throttle/brake/steer plus the
 // handbrake/reset flags Vehicle.step reads), so it assigns directly onto
-// Vehicle.inputs. A minimal XZ projection core is duplicated locally (kept
-// import-free like the race ports) so end-to-end samples carrying the line
-// plus the car pose resolve without a second module. The cornering-load
-// throttle cap (RacingLine.throttle_cap) is duplicated locally too, so the
-// throttle branch caps full throttle toward the 0.25 floor exactly where
-// the Godot driver would.
+// Vehicle.inputs. The XZ projection core (arc/point/speed, closest index,
+// curvature, throttle cap, top speed) is the canonical racing_line.ts
+// implementation — this module only normalizes samples to finite Pt lists
+// and delegates, mirroring scripts/ai/ai_input.gd which calls into
+// RacingLine instead of re-implementing it.
+
+import {
+  MAX_SPEED,
+  arcOf,
+  closestIndex,
+  curvatureOf,
+  pointAtArc,
+  speedAtArc,
+  throttleCap,
+} from "./racing_line";
 
 export const LOOKAHEAD_BASE = 4.0;
 export const LOOKAHEAD_GAIN = 0.5;
@@ -19,13 +28,6 @@ export const ANG_DAMP = 0.3;
 export const THROTTLE_GAIN = 0.5;
 export const BRAKE_GAIN = 0.4;
 export const DEADBAND = 0.5;
-
-// Local copy of the RacingLine grip budget: the file stays import-free
-// (ai hygiene gate), so the cap math below cannot import GRIP_BUDGET.
-const CAP_GRIP = 9.0;
-const CAP_FLOOR = 0.25;
-
-const LINE_TOP = 28.0;
 
 export type AiDrive = {
   throttle: number;
@@ -42,23 +44,6 @@ type Pt = {
 
 function clamp(value: number, lo: number, hi: number): number {
   return Math.min(Math.max(value, lo), hi);
-}
-
-// Local copy of RacingLine.throttle_cap: linear headroom against the
-// grip budget, floored so bad input can never zero the throttle.
-function capFor(latLoad: number, grip: number): number {
-  if (!Number.isFinite(latLoad)) {
-    return 1.0;
-  }
-  const budget = Number.isFinite(grip) ? grip : CAP_GRIP;
-  return clamp(1 - Math.abs(latLoad) / Math.max(budget, 0.01), CAP_FLOOR, 1.0);
-}
-
-function fposmod(value: number, mod: number): number {
-  if (!Number.isFinite(value) || !Number.isFinite(mod) || mod <= 0) {
-    return 0;
-  }
-  return ((value % mod) + mod) % mod;
 }
 
 function wrapPi(angle: number): number {
@@ -121,169 +106,6 @@ function ptsOf(value: unknown): Pt[] {
     }
   }
   return out;
-}
-
-function trackLenOf(pts: Pt[], closed: boolean): number {
-  if (pts.length < 2) {
-    return 0;
-  }
-  const count = closed ? pts.length : pts.length - 1;
-  let total = 0;
-  for (let i = 0; i < count; i += 1) {
-    const a = pts[i];
-    const b = pts[(i + 1) % pts.length];
-    total += Math.hypot(b.x - a.x, b.z - a.z);
-  }
-  return total;
-}
-
-function arcOfLocal(pts: Pt[], p: Pt, closed: boolean): number {
-  if (pts.length < 2) {
-    return 0;
-  }
-  const n = pts.length;
-  const count = closed ? n : n - 1;
-  let bestD = Infinity;
-  let bestS = 0;
-  let s = 0;
-  for (let i = 0; i < count; i += 1) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    const abx = b.x - a.x;
-    const abz = b.z - a.z;
-    const segLen = Math.hypot(abx, abz);
-    const denom = abx * abx + abz * abz;
-    let t = 0;
-    if (denom > 0.000001) {
-      t = clamp(((p.x - a.x) * abx + (p.z - a.z) * abz) / denom, 0, 1);
-    }
-    const d = Math.hypot(p.x - (a.x + abx * t), p.z - (a.z + abz * t));
-    if (d < bestD) {
-      bestD = d;
-      bestS = s + segLen * t;
-    }
-    s += segLen;
-  }
-  return bestS;
-}
-
-function pointAtLocal(pts: Pt[], s: number, closed: boolean): Pt {
-  const n = pts.length;
-  if (n === 0) {
-    return { x: 0, z: 0 };
-  }
-  if (n === 1) {
-    return { x: pts[0].x, z: pts[0].z };
-  }
-  const total = trackLenOf(pts, closed);
-  if (total < 0.001) {
-    return { x: pts[0].x, z: pts[0].z };
-  }
-  let rest = closed ? fposmod(s, total) : clamp(s, 0, total);
-  const count = closed ? n : n - 1;
-  for (let i = 0; i < count; i += 1) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    const seg = Math.hypot(b.x - a.x, b.z - a.z);
-    if (rest <= seg) {
-      const t = seg > 0.0001 ? rest / seg : 0;
-      return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
-    }
-    rest -= seg;
-  }
-  const last = closed ? pts[0] : pts[n - 1];
-  return { x: last.x, z: last.z };
-}
-
-// Nearest waypoint index to a position (XZ only); mirrors
-// racing_line.ts closestIndex over the local Pt shape.
-function closestIndexOf(pts: Pt[], p: Pt): number {
-  let best = 0;
-  let bestD = Infinity;
-  for (let i = 0; i < pts.length; i += 1) {
-    const dx = p.x - pts[i].x;
-    const dz = p.z - pts[i].z;
-    if (!Number.isFinite(dx) || !Number.isFinite(dz)) {
-      continue;
-    }
-    const d = dx * dx + dz * dz;
-    if (d < bestD) {
-      bestD = d;
-      best = i;
-    }
-  }
-  return best;
-}
-
-// Heading-change curvature at point i over mean segment length (0 on
-// straights, ~1/R on arcs); mirrors racing_line.ts curvatureOf so
-// geometry-carrying samples derive the same kappa without an import.
-function curvatureOfLocal(pts: Pt[], index: number, closed: boolean): number {
-  const n = pts.length;
-  if (n < 3) {
-    return 0;
-  }
-  if (!Number.isFinite(index)) {
-    return 0;
-  }
-  const i = Math.trunc(index);
-  if (i < 0 || i >= n) {
-    return 0;
-  }
-  if (!closed && (i <= 0 || i >= n - 1)) {
-    return 0;
-  }
-  const prev = pts[(i - 1 + n) % n];
-  const cur = pts[i];
-  const nxt = pts[(i + 1) % n];
-  const ax = cur.x - prev.x;
-  const az = cur.z - prev.z;
-  const bx = nxt.x - cur.x;
-  const bz = nxt.z - cur.z;
-  const la = Math.hypot(ax, az);
-  const lb = Math.hypot(bx, bz);
-  if (la < 0.001 || lb < 0.001) {
-    return 0;
-  }
-  const cross = ax * bz - az * bx;
-  const dot = ax * bx + az * bz;
-  const ang = Math.abs(Math.atan2(cross, dot));
-  const avg = (la + lb) * 0.5;
-  if (!Number.isFinite(ang) || avg < 0.001) {
-    return 0;
-  }
-  return ang / avg;
-}
-
-function speedAtLocal(pts: Pt[], sp: number[], s: number, closed: boolean): number {
-  if (sp.length === 0) {
-    return LINE_TOP;
-  }
-  if (sp.length === 1 || pts.length < 2) {
-    if (pts.length < 2 && sp.length > 1) {
-      return Math.max(...sp);
-    }
-    return sp[0];
-  }
-  const n = pts.length;
-  const m = sp.length;
-  const total = trackLenOf(pts, closed);
-  if (total < 0.001) {
-    return sp[0];
-  }
-  let rest = closed ? fposmod(s, total) : clamp(s, 0, total);
-  const count = closed ? n : n - 1;
-  for (let i = 0; i < count; i += 1) {
-    const a = pts[i];
-    const b = pts[(i + 1) % n];
-    const seg = Math.hypot(b.x - a.x, b.z - a.z);
-    if (rest <= seg) {
-      const t = seg > 0.0001 ? rest / seg : 0;
-      return sp[i % m] + (sp[(i + 1) % m] - sp[i % m]) * t;
-    }
-    rest -= seg;
-  }
-  return closed ? sp[0] : sp[(n - 1) % m];
 }
 
 // Speed-scaled lookahead distance, clamped to [base, max].
@@ -475,8 +297,8 @@ export function aiInput(...args: unknown[]): AiDrive {
   if (!Number.isFinite(angle)) {
     let look: Pt | null = lookExplicit;
     if (look === null && carPos !== null && pts.length >= 2) {
-      const arc = arcOfLocal(pts, carPos, closed);
-      look = pointAtLocal(pts, arc + lookaheadFor(speed), closed);
+      const arc = arcOf(pts, carPos, closed);
+      look = pointAtArc(pts, arc + lookaheadFor(speed), closed);
     }
     if (look !== null && carPos !== null) {
       const want = Math.atan2(-(look.x - carPos.x), -(look.z - carPos.z));
@@ -493,11 +315,11 @@ export function aiInput(...args: unknown[]): AiDrive {
   }
   if (!Number.isFinite(target)) {
     if (speeds.length > 0 && carPos !== null && pts.length >= 2) {
-      target = speedAtLocal(pts, speeds, arcOfLocal(pts, carPos, closed), closed);
+      target = speedAtArc(pts, speeds, arcOf(pts, carPos, closed), closed);
     } else if (speeds.length > 0) {
       target = Math.max(...speeds);
     } else {
-      target = LINE_TOP;
+      target = MAX_SPEED;
     }
   }
   // Off-track slowdown (Godot parity): shed target speed when pointing
@@ -524,19 +346,19 @@ export function aiInput(...args: unknown[]): AiDrive {
   } else {
     let kappa = kappaExplicit;
     if (!Number.isFinite(kappa) && pts.length >= 3 && carPos !== null) {
-      const carIdx = closestIndexOf(pts, carPos);
+      const carIdx = closestIndex(pts, carPos);
       let lookPt = lookExplicit;
       if (lookPt === null) {
-        lookPt = pointAtLocal(pts, arcOfLocal(pts, carPos, closed) + lookaheadFor(spd), closed);
+        lookPt = pointAtArc(pts, arcOf(pts, carPos, closed) + lookaheadFor(spd), closed);
       }
-      const lookIdx = closestIndexOf(pts, lookPt);
-      kappa = Math.max(curvatureOfLocal(pts, carIdx, closed), curvatureOfLocal(pts, lookIdx, closed));
+      const lookIdx = closestIndex(pts, lookPt);
+      kappa = Math.max(curvatureOf(pts, carIdx, closed), curvatureOf(pts, lookIdx, closed));
     }
     if (Number.isFinite(kappa as number)) {
       lat = Math.max(lat, spd * spd * (kappa as number));
     }
   }
-  const thrCap = capFor(lat, grip);
+  const thrCap = throttleCap(lat, grip);
   if (!Number.isFinite(err) || !Number.isFinite(steer)) {
     return coast;
   }
