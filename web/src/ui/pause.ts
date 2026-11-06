@@ -16,6 +16,10 @@ export type PauseHandle = {
   isVisible: () => boolean;
 };
 
+// Routers already scoped by an earlier attachPause call: the show()
+// wrap below is idempotent so repeated mounts never stack hides.
+const scopedRouters: WeakSet<object> = new WeakSet();
+
 // Pause entry point behind the main.ts alias (setPaused gates the loop
 // and the race clock). Falls back silently when no window handle exists
 // (vitest/Node). Never throws.
@@ -133,6 +137,32 @@ export function attachPause(
         return false;
       }
     };
+    // Navigation scoping: a pause left visible on the race screen must
+    // never rest over menu/settings/results (notably the race-finish
+    // router.show("results") path in boot). Wrap the passed router's
+    // show so landing anywhere off "race" hides the overlay and
+    // unpauses; entering race never auto-pauses. Idempotent across
+    // repeated attachPause calls, and unknown-name throws propagate
+    // from the call-through without hiding. Guarded; never throws.
+    try {
+      if (router !== null && router !== undefined && !scopedRouters.has(router)) {
+        const originalShow = router.show.bind(router);
+        router.show = (name: string): void => {
+          originalShow(name);
+          try {
+            if (router.current() !== "race") {
+              setVisible(false);
+              setPaused(false);
+            }
+          } catch {
+            // Display sinks never throw.
+          }
+        };
+        scopedRouters.add(router);
+      }
+    } catch {
+      // Router wrapping is best effort.
+    }
     try {
       const w = globalThis as unknown as {
         addEventListener?: (type: string, listener: (e: unknown) => void) => void;
@@ -143,6 +173,13 @@ export function attachPause(
             const key = (event as { key?: unknown }).key;
             if (key === "Escape" || key === "ui_cancel") {
               if (!isRaceScreen()) {
+                // A leaked overlay (paused on race, then routed away
+                // without a keypress) dismisses on Escape instead of
+                // sticking; never toggles on off-race.
+                if (isVisible()) {
+                  setVisible(false);
+                  setPaused(false);
+                }
                 return;
               }
               if (isVisible()) {
