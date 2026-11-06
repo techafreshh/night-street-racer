@@ -7,7 +7,8 @@
 // vehicles/camera.ts hygiene contract, so Node/vitest stays WebGL-free.
 // The three.js scene objects live in render/effects.ts.
 
-import type { Vec3 } from "../physics/world";
+import type { Quat, Vec3 } from "../physics/vec";
+import { rotateVecByQuat } from "../physics/vec";
 
 // Smoke pool budget: at most this many live billboard puffs.
 export const SMOKE_MAX = 64;
@@ -82,6 +83,40 @@ function copyVec(raw: Vec3 | null | undefined): Vec3 {
   const z = typeof raw.z === "number" && Number.isFinite(raw.z) ? raw.z : 0.0;
   return { x, y, z };
 }
+
+// Rear skid anchors: the WHEEL_MOUNTS rear pair (left -0.85, right +0.85,
+// both +1.35 rearward) rotated by the body quaternion and added to the
+// body-origin pos, so the skid ribbon follows heading instead of staying
+// world-axis-aligned. Pure math (physics/vec only), no Rapier/three/DOM,
+// so the sink math stays unit-testable and the fx module hygiene test
+// (no runtime three.js import) stays green.
+const REAR_LEFT_MOUNT: Vec3 = { x: -0.85, y: 0, z: 1.35 };
+const REAR_RIGHT_MOUNT: Vec3 = { x: 0.85, y: 0, z: 1.35 };
+
+export function rearSkidAnchors(
+  pos: Vec3,
+  quat: Quat,
+): { left: Vec3; right: Vec3 } {
+  const anchor = copyVec(pos);
+  const q: Quat = {
+    x: typeof quat?.x === "number" && Number.isFinite(quat.x) ? quat.x : 0,
+    y: typeof quat?.y === "number" && Number.isFinite(quat.y) ? quat.y : 0,
+    z: typeof quat?.z === "number" && Number.isFinite(quat.z) ? quat.z : 0,
+    w: typeof quat?.w === "number" && Number.isFinite(quat.w) ? quat.w : 1,
+  };
+  const left = rotateVecByQuat(REAR_LEFT_MOUNT, q);
+  const right = rotateVecByQuat(REAR_RIGHT_MOUNT, q);
+  return {
+    left: { x: anchor.x + left.x, y: anchor.y + left.y, z: anchor.z + left.z },
+    right: {
+      x: anchor.x + right.x,
+      y: anchor.y + right.y,
+      z: anchor.z + right.z,
+    },
+  };
+}
+
+export const rear_skid_anchors = rearSkidAnchors;
 
 // Fixed-size smoke pool (fx_pool.gd `_pick_victim` idiom): a
 // round-robin cursor overwrites the oldest slot, ages tick up in

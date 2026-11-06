@@ -4,7 +4,7 @@ import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events"
 import { STEP_DT, createFpsMeter, start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
 import { getTune } from "./data/tunes";
-import { rotateVecByQuat, type Quat, type Vec3 } from "./physics/vec";
+import { IDENTITY_QUAT, rotateVecByQuat, type Quat, type Vec3 } from "./physics/vec";
 import type { PhysicsWorld } from "./physics/world";
 import type {
   Vehicle,
@@ -21,7 +21,7 @@ import {
   type CameraPose,
   type CameraSample,
 } from "./vehicles/camera";
-import { VehicleFX, type FxSample } from "./vehicles/fx";
+import { VehicleFX, rearSkidAnchors, type FxSample } from "./vehicles/fx";
 import type { HingeFlash } from "./render/effects";
 import {
   SAVE_KEY,
@@ -1097,6 +1097,7 @@ export function worldTick(dt: number): void {
     const fxLive = ensureFx();
     const car = vehicle ?? windowNSRVehicle();
     let fxPos: Vec3 = carPos;
+    let fxQuat: Quat = { ...IDENTITY_QUAT };
     let slip = 0;
     let speed = 0;
     let braking = false;
@@ -1110,6 +1111,11 @@ export function worldTick(dt: number): void {
         grounded = state.isGrounded;
         const pedal = car.inputs.brake;
         braking = typeof pedal === "number" && pedal > 0.05;
+        try {
+          fxQuat = { ...(car.body.rotation() as Quat) };
+        } catch {
+          // Keep the identity heading; anchors stay axis-aligned.
+        }
       } catch {
         // Keep the parked defaults; FX never breaks stepping.
       }
@@ -1121,7 +1127,24 @@ export function worldTick(dt: number): void {
         braking = false;
       }
     }
-    fxLive.update(dt, { slip, speed, brake: braking, grounded, pos: fxPos });
+    let fxLeft: Vec3 | null = null;
+    let fxRight: Vec3 | null = null;
+    try {
+      const anchors = rearSkidAnchors(fxPos, fxQuat);
+      fxLeft = anchors.left;
+      fxRight = anchors.right;
+    } catch {
+      // Keep the nulls; VehicleFX falls back to anchor.x +/- 0.8.
+    }
+    fxLive.update(dt, {
+      slip,
+      speed,
+      brake: braking,
+      grounded,
+      pos: fxPos,
+      left: fxLeft,
+      right: fxRight,
+    });
     try {
       // Staged effects (chunk-budget split): skipped until stage C lands.
       if (engine.effects !== null) {
