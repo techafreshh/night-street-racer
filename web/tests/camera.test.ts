@@ -195,4 +195,17 @@ describe("camera module hygiene", () => {
     expect(text).not.toMatch(/from\s+["']three["']/);
     expect(text).not.toMatch(/require\(\s*["']three["']\s*\)/);
   });
+
+  it("builds the initial scene camera from FOV_MIN", () => {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+    const text = readFileSync(join(root, "main.ts"), "utf8");
+    expect(text).toMatch(
+      /import\s*\{[^}]*\bFOV_MIN\b[^}]*\}\s*from\s*["']\.\/vehicles\/camera["']/,
+    );
+    const constructed = text.match(
+      /new\s+THREE\.PerspectiveCamera\(\s*([^,)]+)/,
+    );
+    expect(constructed).not.toBeNull();
+    expect(constructed?.[1]?.trim()).toBe("FOV_MIN");
+  });
 });
