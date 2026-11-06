@@ -259,11 +259,34 @@ export type NearestLanePoint = {
 export class Traffic {
   cars: TrafficCar[] = [];
   playerPos: Vec3 = { ...PLAYER_ANCHOR_DEFAULT };
+  // Race-mode flag (grid arming idiom): active fleets cruise and recycle,
+  // parked fleets (time-trial) ease every car to a stop in place while
+  // keeping all 6 cars so count probes hold in every mode.
+  active = true;
   private world: RAPIER.World | null = null;
   private rapier: RapierModule | null = null;
 
   constructor() {
     this.spawnFleet();
+  }
+
+  // True while the fleet cruises (false parks motion for time-trial).
+  isActive(): boolean {
+    return this.active === true;
+  }
+
+  is_active(): boolean {
+    return this.isActive();
+  }
+
+  // Park (false) or release (true) the fleet. Parked cars ease to 0 via
+  // the brake rate but are never destroyed, so cars.length stays 6.
+  setActive(value: boolean): void {
+    this.active = value === true;
+  }
+
+  set_active(value: boolean): void {
+    this.setActive(value);
   }
 
   // Fleet spawn: lane i % 3, staggered slots per lane, uniform 9.0 m/s
@@ -337,10 +360,27 @@ export class Traffic {
   // One fixed tick: recycle strays beyond 150 m, then ease every car
   // toward its yield target. Never steps the Rapier world (caller owns
   // stepping); without an attached world every ray reads unblocked.
+  // Parked fleets (time-trial) skip the recycle churn and ease every car
+  // to a stop in place — still wrapping/posing along the lane so the
+  // fleet keeps moving coherently while speeds read 0.
   step(dt: number = STEP_DT, playerPos?: Vec3): void {
     const stepDt = dt > 0 ? dt : STEP_DT;
     const anchor = playerPos ?? this.playerPos;
     this.playerPos = { ...anchor };
+    if (!this.isActive()) {
+      for (const car of this.cars) {
+        car.speedMs = moveToward(car.speedMs, 0, BRAKE_RATE * stepDt);
+        const length = laneLength(car.lane);
+        if (length < 1.0) {
+          continue;
+        }
+        car.progress = fposmod(car.progress + car.speedMs * stepDt, length);
+        const pose = sampleLane(car.lane, car.progress);
+        car.position = pose.position;
+        car.yaw = pose.yaw;
+      }
+      return;
+    }
     for (const car of this.cars) {
       if (Math.sqrt(distSquared(car.position, anchor)) > RECYCLE_DISTANCE) {
         this.recycleCar(car, anchor);
@@ -505,3 +545,18 @@ export class Traffic {
     return car.getState();
   }
 }
+
+// Shared fleet behind the running service: main.ts ensureTraffic plus the
+// garage/results arming paths all drive this one instance, so the parked
+// flag and the live poses never diverge between entry points.
+let shared: Traffic | null = null;
+
+export function sharedTraffic(): Traffic {
+  if (shared === null) {
+    shared = new Traffic();
+  }
+  return shared;
+}
+
+// v1 snake_case alias (same reference).
+export const shared_traffic = sharedTraffic;

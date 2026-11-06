@@ -23,6 +23,8 @@ import {
 } from "../game/records";
 import { gameState } from "../game/state";
 import { manager } from "../race/manager";
+import { armGridForEvent } from "../race/grid";
+import { sharedTraffic } from "../traffic/traffic";
 import { formatTime } from "../race/timetrial";
 import { appendChild, menuButton, onPress, screenRoot, staticLine } from "./screens";
 
@@ -263,6 +265,20 @@ export function renderResults(
           manager.startEvent(resolved.eventId, solo ? 1 : undefined);
         } catch {
           manager.startEvent(MOCK_EVENT, solo ? 1 : undefined);
+        }
+        // Retry re-arms the full grid like main.ts startRace so the
+        // retry matches a fresh arm (same car, same traffic mode).
+        try {
+          const carId = gameState.getSelectedCar() || gameState.getDefaultCar();
+          const effective = manager.eventId !== "" ? manager.eventId : resolved.eventId;
+          armGridForEvent(effective, { carId, solo });
+        } catch {
+          // Grid faults never block navigation.
+        }
+        try {
+          sharedTraffic().setActive(!solo);
+        } catch {
+          // Traffic-mode faults never block navigation.
         }
         seedHudBest(resolved.eventId);
       } catch {
