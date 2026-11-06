@@ -305,6 +305,8 @@ export type AiNamespace = {
   curvature_of: typeof racingLine.curvature_of;
   rawSpeed: typeof racingLine.rawSpeed;
   raw_speed: typeof racingLine.raw_speed;
+  throttleCap: typeof racingLine.throttleCap;
+  throttle_cap: typeof racingLine.throttle_cap;
   trackLength: typeof racingLine.trackLength;
   track_length: typeof racingLine.track_length;
   arcOf: typeof racingLine.arcOf;
@@ -331,6 +333,7 @@ export type AiNamespace = {
   MAX_SPEED: number;
   LATERAL_ACCEL: number;
   BRAKE_DECEL: number;
+  GRIP_BUDGET: number;
   MAX_AID: number;
   GAIN: number;
 };
@@ -2357,6 +2360,8 @@ async function boot(): Promise<void> {
       curvature_of: racingLine.curvature_of,
       rawSpeed: racingLine.rawSpeed,
       raw_speed: racingLine.raw_speed,
+      throttleCap: racingLine.throttleCap,
+      throttle_cap: racingLine.throttle_cap,
       trackLength: racingLine.trackLength,
       track_length: racingLine.track_length,
       arcOf: racingLine.arcOf,
@@ -2383,6 +2388,7 @@ async function boot(): Promise<void> {
       MAX_SPEED: racingLine.MAX_SPEED,
       LATERAL_ACCEL: racingLine.LATERAL_ACCEL,
       BRAKE_DECEL: racingLine.BRAKE_DECEL,
+      GRIP_BUDGET: racingLine.GRIP_BUDGET,
       MAX_AID: rubberBandMod.MAX_AID,
       GAIN: rubberBandMod.GAIN,
     },
