@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Plugin, ViteDevServer, PreviewServer } from "vite";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 // Health payload served on GET /health; single source of truth for the
 // contract value asserted by scripts/smoke.mjs and the scenario probes.
@@ -37,6 +37,11 @@ function healthPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [healthPlugin()],
+  test: {
+    // Playwright specs live beside vitest suites; the default vitest
+    // glob would execute *.spec.ts, so pin the include to *.test.ts.
+    include: ["tests/**/*.test.ts"],
+  },
   build: {
     // Loading-budget ceiling (issue #226): the entry chunk stays lean
     // via code-split screens in main.ts; the two heavy static imports
