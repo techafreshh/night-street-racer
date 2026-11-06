@@ -9,12 +9,29 @@ let rapierInit: Promise<void> | null = null;
 
 // Compat build embeds WASM as base64: one awaited init, no fetch. The
 // shared promise keeps concurrent boot callers (drive plus city) from
-// starting two in-flight inits, which corrupts WASM memory.
+// starting two in-flight inits, which corrupts WASM memory. A rejected
+// init resets the handle before rethrowing so the next call retries
+// instead of poisoning the session on the cached rejection.
 export async function ensureRapierReady(): Promise<void> {
   if (rapierInit === null) {
-    rapierInit = RAPIER.init();
+    const pending = RAPIER.init();
+    rapierInit = pending;
+    try {
+      await pending;
+    } catch (error) {
+      if (rapierInit === pending) {
+        rapierInit = null;
+      }
+      throw error;
+    }
+    return;
   }
-  await rapierInit;
+  try {
+    await rapierInit;
+  } catch (error) {
+    rapierInit = null;
+    throw error;
+  }
 }
 
 // Fixed 60 Hz accumulator tick (loop.ts STEP idiom).

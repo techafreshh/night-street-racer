@@ -119,6 +119,20 @@ export function attachPause(
       host = root;
     }
     appendChild(host, node);
+    // Escape toggles only while a race is showing (router.current idiom
+    // from main.ts boot): menu/settings/results/garage never surface the
+    // overlay during the soak. A missing router still toggles so the
+    // overlay stays usable when boot wiring is absent.
+    const isRaceScreen = (): boolean => {
+      try {
+        if (router === null || router === undefined) {
+          return true;
+        }
+        return router.current() === "race";
+      } catch {
+        return false;
+      }
+    };
     try {
       const w = globalThis as unknown as {
         addEventListener?: (type: string, listener: (e: unknown) => void) => void;
@@ -128,6 +142,9 @@ export function attachPause(
           try {
             const key = (event as { key?: unknown }).key;
             if (key === "Escape" || key === "ui_cancel") {
+              if (!isRaceScreen()) {
+                return;
+              }
               if (isVisible()) {
                 setVisible(false);
                 setPaused(false);

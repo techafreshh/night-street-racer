@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
 import { EventEmitter, createRaceEmitter, type RaceEvents } from "./core/events";
-import { start, type LoopHandle } from "./core/loop";
+import { createFpsMeter, start, type LoopHandle } from "./core/loop";
 import { Router } from "./core/router";
 import { getTune } from "./data/tunes";
 import { ensureRapierReady, PhysicsWorld, rotateVecByQuat, STEP_DT, type Quat, type Vec3 } from "./physics/world";
@@ -28,11 +28,15 @@ import {
 } from "./vehicles/camera";
 import { VehicleFX, type FxSample } from "./vehicles/fx";
 import {
+  buildSkidMesh,
+  buildSmokeBillboards,
   createBrakeLightMaterial,
   ensureFlashOverlay,
   HingeFlash,
   syncBrakeLight,
   syncFlashOverlay,
+  syncSkids,
+  syncSmoke,
 } from "./render/effects";
 import {
   SAVE_KEY,
@@ -367,6 +371,7 @@ export type LightingNamespace = {
   readonly pass_names: readonly string[];
   readonly drawCalls: number;
   readonly draw_calls: number;
+  readonly fps: number;
   readonly rig: LightRig | null;
   readonly counts: { total: number; maxPerMesh: number };
   readonly toneMapping: number;
@@ -390,6 +395,13 @@ function publishLighting(): LightingNamespace {
     },
     get draw_calls(): number {
       return sampleDrawCalls(nightRenderer) ?? 0;
+    },
+    get fps(): number {
+      try {
+        return fpsMeter.fps;
+      } catch {
+        return 0;
+      }
     },
     get rig(): LightRig | null {
       return lightRig;
@@ -454,6 +466,18 @@ const fxFlash = new HingeFlash();
 let fxBrakeMaterial: THREE.MeshStandardMaterial | null = null;
 // Hinge-flash DOM overlay (null until boot wires the document).
 let flashElement: HTMLElement | null = null;
+
+// Probe-readable FPS meter sampled every renderFrame (issue #229):
+// a numeric surface for the soak average with zero visual impact.
+const fpsMeter = createFpsMeter();
+
+// FX scene meshes mounted once in initScene (null until then); the
+// worldTick FX sink syncs the live pools into them.
+let smokeMesh: THREE.InstancedMesh | null = null;
+let skidMesh: THREE.LineSegments | null = null;
+
+// Stored resize listener so double initScene leaves one listener.
+let sceneResizeHandler: (() => void) | null = null;
 
 function ensureFx(): VehicleFX {
   if (fxInstance === null) {
@@ -804,13 +828,15 @@ export function worldTick(dt: number): void {
       shakeEnabled: readShakeEnabled(),
     });
   }
-  // FX sink: samples the live car (slip/speed/brake/grounded) into the
-  // shared VehicleFX instance, syncs the probe brake material, and
-  // decays the hinge flash. FX never reads the shake flag (it never
-  // shakes the camera itself). Guarded so FX never breaks the step.
+  // FX sink: samples the live car (pos/slip/speed/brake/grounded) into
+  // the shared VehicleFX instance, syncs the pooled smoke/skid scene
+  // meshes plus the probe brake material, and decays the hinge flash.
+  // FX never reads the shake flag (it never shakes the camera itself).
+  // Guarded so FX never breaks the step.
   try {
     const fxLive = ensureFx();
     const car = vehicle ?? windowNSRVehicle();
+    let fxPos: Vec3 = carPos;
     let slip = 0;
     let speed = 0;
     let braking = false;
@@ -818,6 +844,7 @@ export function worldTick(dt: number): void {
     if (car !== null) {
       try {
         const state = car.getState();
+        fxPos = { ...state.position };
         slip = state.slipIntensity;
         speed = state.speedMs;
         grounded = state.isGrounded;
@@ -834,7 +861,17 @@ export function worldTick(dt: number): void {
         braking = false;
       }
     }
-    fxLive.update(dt, { slip, speed, brake: braking, grounded });
+    fxLive.update(dt, { slip, speed, brake: braking, grounded, pos: fxPos });
+    try {
+      syncSmoke(smokeMesh, fxLive.smoke);
+    } catch {
+      // The smoke pool must never break the fixed step.
+    }
+    try {
+      syncSkids(skidMesh, fxLive.skids);
+    } catch {
+      // The skid ribbon must never break the fixed step.
+    }
     try {
       syncBrakeLight(ensureBrakeMaterial(), fxLive.brakes);
     } catch {
@@ -1383,12 +1420,19 @@ async function initDrive(): Promise<void> {
   try {
     await ensureRapierReady();
     const world = new PhysicsWorld();
-    world.makeGround();
+    // Single ground slab (issue #229): the city statics carry the y=0
+    // plane when they land, so the flat fallback slab mounts only when
+    // the city step fails — never a coplanar double slab at y=0.
+    let cityStaticsOk = false;
     try {
       addGroundColliders(world.world, RAPIER);
       addBarrierColliders(world.world, RAPIER);
+      cityStaticsOk = true;
     } catch {
       // City statics are additive; the flat slab still drives.
+    }
+    if (!cityStaticsOk) {
+      world.makeGround();
     }
     const sedan = getTune("sedan");
     const car = new Vehicle(world, sedan === undefined ? {} : { tune: tuneFromCarTune(sedan) });
@@ -1443,7 +1487,7 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   scene.background = new THREE.Color(0x0a0a12);
   scene.fog = createFog();
   const camera = new THREE.PerspectiveCamera(
-    60,
+    fovForSpeed(0),
     window.innerWidth / window.innerHeight,
     0.1,
     1000,
@@ -1481,6 +1525,21 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   } catch {
     // Emissive dressing is additive; the menu stays without it.
   }
+  // FX scene layer: instanced smoke billboards plus the preallocated
+  // skid ribbon, mounted once beside the district dressing (same
+  // guarded pattern) and synced from the worldTick FX sink.
+  try {
+    smokeMesh = buildSmokeBillboards();
+    scene.add(smokeMesh);
+  } catch {
+    smokeMesh = null;
+  }
+  try {
+    skidMesh = buildSkidMesh();
+    scene.add(skidMesh);
+  } catch {
+    skidMesh = null;
+  }
   if (renderer !== null) {
     try {
       nightComposer = createNightComposer(renderer, scene, camera);
@@ -1504,7 +1563,11 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
       // The rig holds the fog fallback without the HDRI.
     }
     try {
-      window.addEventListener("resize", () => {
+      if (sceneResizeHandler !== null) {
+        window.removeEventListener("resize", sceneResizeHandler);
+        sceneResizeHandler = null;
+      }
+      const onResize = (): void => {
         try {
           camera.aspect = window.innerWidth / window.innerHeight;
           camera.updateProjectionMatrix();
@@ -1517,7 +1580,9 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
         } catch {
           // Resizes must never break rendering.
         }
-      });
+      };
+      sceneResizeHandler = onResize;
+      window.addEventListener("resize", onResize);
     } catch {
       // Resize wiring is best-effort.
     }
@@ -2070,8 +2135,15 @@ async function boot(): Promise<void> {
     window.__fixedSteps = fixedSteps;
   });
   // Render reads the latest state every frame, independent of stepping,
-  // so pause gates steps while the scene and DOM stay alive.
+  // so pause gates steps while the scene and DOM stay alive. The fps
+  // meter samples wall time here (never in the fixed step) for the
+  // probe-readable soak average.
   const renderFrame = (): void => {
+    try {
+      fpsMeter.sample(performance.now());
+    } catch {
+      // The meter must never break rendering.
+    }
     renderScene();
     requestAnimationFrame(renderFrame);
   };
