@@ -16,6 +16,8 @@ import {
   PhysicsWorld,
 } from "../src/physics/world";
 import {
+  applyPlayerInput,
+  apply_player_input,
   clampToFrictionCircle,
   clamp_to_friction_circle,
   computeLateralForce,
@@ -38,6 +40,7 @@ import {
   dampSlip,
   damp_slip,
 } from "../src/vehicles/assists";
+import { createPlayerInput } from "../src/vehicles/input";
 
 const suiteDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -222,6 +225,52 @@ describe("vehicle vocabulary", () => {
     expect(correct_steer).toBe(correctSteer);
     expect(damp_slip).toBe(dampSlip);
     expect(reset_candidates({ x: 0, y: 1, z: 0 })).toHaveLength(25);
+  });
+});
+
+describe("player input wiring", () => {
+  it("copies held keys into vehicle inputs so the car accelerates", () => {
+    const { car } = freshCar();
+    const player = createPlayerInput();
+    expect(apply_player_input).toBe(applyPlayerInput);
+
+    player.setKey("KeyW", true);
+    player.poll();
+    applyPlayerInput(car.inputs, player.state);
+    expect(car.inputs.throttle).toBe(1);
+
+    player.setKey("KeyA", true);
+    player.setKey("Space", true);
+    player.setKey("KeyR", true);
+    player.poll();
+    applyPlayerInput(car.inputs, player.state);
+    expect(car.inputs.throttle).toBe(1);
+    expect(car.inputs.steer).toBe(-1);
+    expect(car.inputs.handbrake).toBe(true);
+    expect(car.inputs.reset).toBe(true);
+
+    player.setKey("KeyW", false);
+    player.setKey("KeyA", false);
+    player.setKey("Space", false);
+    player.setKey("KeyR", false);
+    player.poll();
+    applyPlayerInput(car.inputs, player.state);
+    expect(car.inputs.throttle).toBe(0);
+    expect(car.inputs.steer).toBe(0);
+    expect(car.inputs.handbrake).toBe(false);
+    expect(car.inputs.reset).toBe(false);
+
+    // The wired path drives physics: hold W through the helper each
+    // tick exactly as worldTick does, then the car must pull away.
+    player.setKey("KeyW", true);
+    let top = 0;
+    for (let i = 0; i < 8 * 60; i += 1) {
+      player.poll();
+      applyPlayerInput(car.inputs, player.state);
+      car.step(STEP_DT);
+      top = Math.max(top, car.speedMs);
+    }
+    expect(top).toBeGreaterThanOrEqual(25.0);
   });
 });
 

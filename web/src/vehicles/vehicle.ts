@@ -273,6 +273,63 @@ export type VehicleInputs = {
   reset: boolean;
 };
 
+// Per-tick input bridge source shape: the five held fields the fixed
+// step copies from the polled PlayerInput.state into Vehicle.inputs.
+// Unknown members are ignored; consume-once latches (resetPressed,
+// pausePressed) are never forwarded (a read consumes them).
+export type PlayerInputSource = {
+  throttle?: unknown;
+  brake?: unknown;
+  steer?: unknown;
+  handbrake?: unknown;
+  reset?: unknown;
+};
+
+// Fixed-step input bridge (owned by the main.ts worldTick sink):
+// copies the five held player fields into the live vehicle inputs in
+// place, preserving the shared `window.__nsr.vehicle.inputs`
+// reference. Plain assignment with finite/boolean guards; range and
+// clamp stay in Vehicle.step(). Never throws; mutates and returns
+// the target so ticks can chain the call.
+export function applyPlayerInput(
+  target: VehicleInputs,
+  source: PlayerInputSource | null | undefined,
+): VehicleInputs {
+  try {
+    if (target === null || target === undefined) {
+      return target;
+    }
+    if (source === null || source === undefined) {
+      return target;
+    }
+    if (typeof source.throttle === "number" && Number.isFinite(source.throttle)) {
+      target.throttle = source.throttle;
+    }
+    if (typeof source.brake === "number" && Number.isFinite(source.brake)) {
+      target.brake = source.brake;
+    }
+    if (typeof source.steer === "number" && Number.isFinite(source.steer)) {
+      target.steer = source.steer;
+    }
+    if (source.handbrake === true) {
+      target.handbrake = true;
+    } else if (source.handbrake === false) {
+      target.handbrake = false;
+    }
+    if (source.reset === true) {
+      target.reset = true;
+    } else if (source.reset === false) {
+      target.reset = false;
+    }
+    return target;
+  } catch {
+    return target;
+  }
+}
+
+// snake_case alias for the v1 vocabulary (same reference).
+export const apply_player_input = applyPlayerInput;
+
 export type VehicleOptions = {
   tune?: Partial<VehicleTune>;
   position?: Vec3;

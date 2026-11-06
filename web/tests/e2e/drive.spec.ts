@@ -1,5 +1,6 @@
-// Drive smoke: arms harbor_sprint on the real built app, holds full
-// throttle for 10 s, and fails on any console error or page error.
+// Drive smoke: arms harbor_sprint on the real built app, drives the
+// car through the real input pipeline (no direct `vehicle.inputs`
+// writes), and fails on any console error or page error.
 import { expect, test } from "@playwright/test";
 
 test("drive runs 10 s with zero console errors", async ({ page }) => {
@@ -37,18 +38,34 @@ test("drive runs 10 s with zero console errors", async ({ page }) => {
     return nsr.vehicle.getState().position;
   });
 
+  // Virtual-key leg: hold W through the shared input table so the
+  // per-tick bridge copies it into the vehicle inputs.
   await page.evaluate(() => {
     const nsr = (window as unknown as {
-      __nsr: { vehicle: { inputs: { throttle: number } } };
+      __nsr: { input: { setKey: (code: string, down: boolean) => void } };
     }).__nsr;
-    nsr.vehicle.inputs.throttle = 1;
+    nsr.input.setKey("KeyW", true);
   });
 
-  await page.waitForTimeout(10_000);
+  await page.waitForTimeout(5_000);
+
+  await page.evaluate(() => {
+    const nsr = (window as unknown as {
+      __nsr: { input: { setKey: (code: string, down: boolean) => void } };
+    }).__nsr;
+    nsr.input.setKey("KeyW", false);
+  });
+
+  // Real-keyboard leg: the window key handler (e.code KeyW) feeds the
+  // same table, so both entry points stay regression-guarded.
+  await page.keyboard.down("w");
+  await page.waitForTimeout(5_000);
+  await page.keyboard.up("w");
 
   const end = await page.evaluate(() => {
     const nsr = (window as unknown as {
       __nsr: {
+        input: { setKey: (code: string, down: boolean) => void };
         vehicle: {
           getState: () => {
             position: { x: number; y: number; z: number };
@@ -57,6 +74,7 @@ test("drive runs 10 s with zero console errors", async ({ page }) => {
         };
       };
     }).__nsr;
+    nsr.input.setKey("KeyW", false);
     return nsr.vehicle.getState();
   });
 
