@@ -1,8 +1,9 @@
 // Static deploy contract suite (duplicate-mutate-reject idiom: green
 // on stock, red on one bad-bound mutation per dimension). Covers the
 // issue #228 portable-build contract with no padding: the Vite base
-// stays document-relative ("./") so Pages subpaths and unzip-and-serve
-// agree, the out dir stays dist/ with a clean empty, every imported
+// stays root-absolute ("/") so the built bundle agrees with the
+// public dir and ASSET_BASE ("/assets") for dist/, Pages, and
+// unzip-and-serve from /, the out dir stays dist/ with a clean empty, every imported
 // byte stays a same-origin file (no inline data URIs), and every
 // GLB/WAV/HDR lane URL stays same-origin (no http(s) CDN). Node-safe:
 // reads the config object and the loader constants, no build output.
@@ -26,8 +27,8 @@ function buildOf(cfg: unknown): BuildConfig {
 }
 
 describe("portable vite base", () => {
-  it("serves every built URL document-relative", () => {
-    expect((config as { base?: unknown }).base).toBe("./");
+  it("serves every built URL root-absolute", () => {
+    expect((config as { base?: unknown }).base).toBe("/");
   });
 
   it("emits a clean dist/ of same-origin files", () => {

@@ -36,10 +36,11 @@ function healthPlugin(): Plugin {
 }
 
 export default defineConfig({
-  // Portable subpath-or-root serving: Pages project sites mount
-  // under /<repo>/ while an unzipped dist.zip is served from /,
-  // so every built URL stays document-relative (./assets/...).
-  base: "./",
+  // Root-absolute serving (issue #228): the built bundle, the Vite
+  // public dir, and ASSET_BASE ("/assets") all resolve same-origin
+  // from the serve root, so dist/, the Pages artifact, and an
+  // unzipped dist.zip served from / agree on /assets/... URLs.
+  base: "/",
   plugins: [healthPlugin()],
   test: {
     // Playwright specs live beside vitest suites; the default vitest
@@ -50,7 +51,7 @@ export default defineConfig({
     // Portable static deploy (issue #228): dist/ is the Pages artifact
     // and the zip root, so the out dir is pinned and always emptied.
     // assetsInlineLimit 0 keeps every imported byte as a same-origin
-    // file under ./assets (no inline data URIs, no CDN fetch).
+    // file under /assets (no inline data URIs, no CDN fetch).
     outDir: "dist",
     emptyOutDir: true,
     assetsInlineLimit: 0,
