@@ -122,3 +122,86 @@ export function resizeRenderer(
 
 // Godot-name alias so harness wording cannot mismatch (same reference).
 export const resize_renderer = resizeRenderer;
+
+// Stored window resize handler so repeated scene boots keep exactly one
+// listener (re-init, HMR, tests). Module-level, beside resizeRenderer,
+// mirroring the PlayerInput keyDownHandler idiom: attach removes the
+// stored handler first, dispose removes it without a window, both never
+// throw and both stay Node-safe (no top-level window dereference).
+let storedSceneResizeHandler: (() => void) | null = null;
+
+// Attach a window resize listener, replacing any stored handler first so
+// a second initScene boot cannot stack a duplicate. No-op (returning a
+// no-op remover) when the handler is not a function or no window
+// exists. Returns a per-call remover for the attached handler. Never
+// throws.
+export function attachSceneResize(
+  handler: (() => void) | null | undefined,
+): () => void {
+  try {
+    if (typeof handler !== "function") {
+      return (): void => {};
+    }
+    if (
+      typeof window === "undefined" ||
+      typeof window.addEventListener !== "function"
+    ) {
+      return (): void => {};
+    }
+    try {
+      if (storedSceneResizeHandler !== null) {
+        window.removeEventListener("resize", storedSceneResizeHandler);
+      }
+    } catch {
+      // A stale removal never blocks the fresh attach.
+    }
+    const attached = handler as () => void;
+    storedSceneResizeHandler = attached;
+    window.addEventListener("resize", attached);
+    return (): void => {
+      try {
+        if (
+          typeof window !== "undefined" &&
+          typeof window.removeEventListener === "function"
+        ) {
+          window.removeEventListener("resize", attached);
+        }
+      } catch {
+        // Removals never throw.
+      }
+      try {
+        if (storedSceneResizeHandler === attached) {
+          storedSceneResizeHandler = null;
+        }
+      } catch {
+        // Clearing never throws.
+      }
+    };
+  } catch {
+    return (): void => {};
+  }
+}
+
+// Godot-name alias so harness wording cannot mismatch (same reference).
+export const attach_scene_resize = attachSceneResize;
+
+// Remove the stored window resize listener, if any. Safe to call twice
+// and safe without a window. Never throws.
+export function disposeSceneResize(): void {
+  try {
+    const stored = storedSceneResizeHandler;
+    storedSceneResizeHandler = null;
+    if (
+      stored !== null &&
+      typeof window !== "undefined" &&
+      typeof window.removeEventListener === "function"
+    ) {
+      window.removeEventListener("resize", stored);
+    }
+  } catch {
+    // Disposal never throws.
+  }
+}
+
+// Godot-name alias so harness wording cannot mismatch (same reference).
+export const dispose_scene_resize = disposeSceneResize;
