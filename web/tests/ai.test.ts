@@ -5,7 +5,7 @@
 // negative-gap cap, deadband coast, lookahead endpoints, braking side) and
 // a static scan proving the AI modules carry no three.js import.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -213,6 +213,33 @@ describe("pursuit input", () => {
     expect(two.throttle).toBe(one.throttle);
     expect(two.brake).toBe(one.brake);
   });
+
+  it("matches canonical arc/speed on a zero-length segment", () => {
+    const line = [
+      { x: 0, z: 0 },
+      { x: 10, z: 0 },
+      { x: 10, z: 0 },
+      { x: 20, z: 0 },
+    ];
+    const speeds = bakeRacingLine(line, false);
+    const carPos = { x: 5, z: 0.5 };
+    const arc = arcOf(line, carPos, false);
+    expect(Number.isFinite(arc)).toBe(true);
+    expect(arc).toBeCloseTo(5, 6);
+    const expected = speedAtArc(line, speeds, arc, false);
+    expect(Number.isFinite(expected)).toBe(true);
+    const geo = aiInput({
+      speedMs: 10,
+      angle: 0,
+      yawRate: 0,
+      points: line,
+      speeds,
+      carPos,
+      loop: false,
+    });
+    const flat = aiInput({ speedMs: 10, angle: 0, yawRate: 0, targetSpeed: expected });
+    expect(geo).toEqual(flat);
+  });
 });
 
 describe("throttle cap", () => {
@@ -256,6 +283,42 @@ describe("throttle cap", () => {
     expect(out.throttle).toBeLessThan(1);
     expect(out.throttle).toBeCloseTo(0.25, 6);
   });
+
+  it("matches throttleCap on a flat high-yaw call", () => {
+    const lat = Math.abs(1.5) * Math.abs(20);
+    const out = aiInput({ speedMs: 20, angle: 0, yawRate: 1.5, targetSpeed: 28 });
+    expect(out.throttle).toBeCloseTo(Math.min(1, throttleCap(lat)), 6);
+  });
+
+  it("matches throttleCap on end-to-end corner geometry", () => {
+    const corner = [
+      { x: 0, z: 0 },
+      { x: 30, z: 0 },
+      { x: 60, z: 10 },
+      { x: 90, z: 10 },
+    ];
+    const carPos = { x: 30, z: 0 };
+    const speed = 10;
+    const arc = arcOf(corner, carPos, true);
+    const look = pointAtArc(corner, arc + lookaheadFor(speed), true);
+    const kappa = Math.max(
+      curvatureOf(corner, closestIndex(corner, carPos), true),
+      curvatureOf(corner, closestIndex(corner, look), true),
+    );
+    const out = aiInput({
+      speedMs: speed,
+      angle: 0,
+      yawRate: 0,
+      targetSpeed: 28,
+      points: corner,
+      carPos,
+    });
+    expect(Number.isFinite(kappa)).toBe(true);
+    expect(out.throttle).toBeCloseTo(
+      Math.min(1, throttleCap(Math.max(0, speed * speed * kappa))),
+      6,
+    );
+  });
 });
 
 describe("ai hygiene", () => {
@@ -263,7 +326,42 @@ describe("ai hygiene", () => {
     for (const file of readdirSync(aiDir).filter((f) => f.endsWith(".ts"))) {
       const text = readFileSync(join(aiDir, file), "utf8");
       expect(text).not.toMatch(/three/);
-      expect(text).not.toMatch(/^\s*import\s/m);
     }
+  });
+
+  it("imports only relative intra-AI siblings", () => {
+    for (const file of readdirSync(aiDir).filter((f) => f.endsWith(".ts"))) {
+      const text = readFileSync(join(aiDir, file), "utf8");
+      expect(text).not.toMatch(/three/i);
+      expect(text).not.toMatch(/rapier/i);
+      expect(text).not.toMatch(/\bdocument\b/);
+      expect(text).not.toMatch(/\bwindow\b/);
+      const specs = [...text.matchAll(/^\s*import[^;]*from\s+["']([^"']+)["']/gm)].map(
+        (match) => match[1],
+      );
+      for (const spec of specs) {
+        expect(spec.startsWith("./")).toBe(true);
+        expect(existsSync(join(aiDir, `${spec.slice(2)}.ts`))).toBe(true);
+      }
+    }
+  });
+
+  it("delegates the XZ projection core to racing_line.ts", () => {
+    const text = readFileSync(join(aiDir, "ai_input.ts"), "utf8");
+    for (const name of [
+      "arcOfLocal",
+      "pointAtLocal",
+      "speedAtLocal",
+      "closestIndexOf",
+      "curvatureOfLocal",
+      "trackLenOf",
+      "capFor",
+      "LINE_TOP",
+      "CAP_GRIP",
+      "CAP_FLOOR",
+    ]) {
+      expect(text).not.toMatch(new RegExp(`\\b${name}\\b`));
+    }
+    expect(text).toMatch(/from\s+["']\.\/racing_line["']/);
   });
 });
