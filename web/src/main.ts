@@ -10,6 +10,7 @@ import type {
   Vehicle,
   VehicleInputs,
   VehicleState,
+  PlayerInputSource,
 } from "./vehicles/vehicle";
 import { input, type PlayerInput } from "./vehicles/input";
 import {
@@ -944,6 +945,122 @@ function readLookBack(): boolean {
   }
 }
 
+// Fallback input bridge while the vehicle stage loads: identical
+// guards to the staged vehicle-module helper (finite numbers win,
+// booleans need an exact true/false), kept local so the entry chunk
+// carries no static engine import (budget gate, issue #243).
+function copyPlayerInputs(target: VehicleInputs, source: PlayerInputSource): void {
+  try {
+    if (typeof source.throttle === "number" && Number.isFinite(source.throttle)) {
+      target.throttle = source.throttle;
+    }
+    if (typeof source.brake === "number" && Number.isFinite(source.brake)) {
+      target.brake = source.brake;
+    }
+    if (typeof source.steer === "number" && Number.isFinite(source.steer)) {
+      target.steer = source.steer;
+    }
+    if (source.handbrake === true) {
+      target.handbrake = true;
+    } else if (source.handbrake === false) {
+      target.handbrake = false;
+    }
+    if (source.reset === true) {
+      target.reset = true;
+    } else if (source.reset === false) {
+      target.reset = false;
+    }
+  } catch {
+    // A torn table never breaks the fixed step.
+  }
+}
+
+// Per-tick player-input bridge (readLookBack probe-first idiom for
+// the source, windowNSRVehicle belt-and-suspenders idiom for the
+// target): copies the five held fields (throttle/brake/steer/
+// handbrake/reset) from the polled input table into the live vehicle
+// inputs in place, preserving the shared `window.__nsr.vehicle.inputs`
+// reference. Prefers the staged vehicle-module helper, falls back to
+// the local copy above. Pause/look-back are not vehicle inputs;
+// consume-once latches are never forwarded. Never throws and no-ops
+// when no vehicle or no table exists.
+function syncPlayerInputs(): void {
+  try {
+    let source: PlayerInputSource | null = null;
+    try {
+      if (typeof window !== "undefined") {
+        const probe = (
+          window as unknown as { __input?: { state?: unknown } | null }
+        ).__input;
+        if (probe !== null && probe !== undefined) {
+          const nested = (probe as { state?: PlayerInputSource }).state;
+          source =
+            nested !== null && nested !== undefined
+              ? nested
+              : (probe as PlayerInputSource);
+        }
+      }
+    } catch {
+      // Fall through to the singleton.
+    }
+    if (source === null) {
+      try {
+        source = input.state;
+      } catch {
+        return;
+      }
+    }
+    if (source === null || source === undefined) {
+      return;
+    }
+    const targets: { inputs?: VehicleInputs }[] = [];
+    try {
+      if (vehicle !== null) {
+        targets.push(vehicle);
+      }
+    } catch {
+      // No module handle; the probe instance still syncs below.
+    }
+    try {
+      const live = windowNSRVehicle();
+      if (live !== null && !targets.includes(live)) {
+        targets.push(live);
+      }
+    } catch {
+      // The probe lookup never breaks the sync.
+    }
+    if (targets.length === 0) {
+      return;
+    }
+    let apply: ((target: VehicleInputs, source: PlayerInputSource) => void) | null = null;
+    try {
+      const helper = engine.vehicleMod?.applyPlayerInput;
+      if (typeof helper === "function") {
+        apply = helper as (target: VehicleInputs, source: PlayerInputSource) => void;
+      }
+    } catch {
+      apply = null;
+    }
+    for (const target of targets) {
+      try {
+        const inputs = target.inputs;
+        if (inputs === null || inputs === undefined) {
+          continue;
+        }
+        if (apply !== null) {
+          apply(inputs, source);
+        } else {
+          copyPlayerInputs(inputs, source);
+        }
+      } catch {
+        // One torn car never breaks the sync of the other.
+      }
+    }
+  } catch {
+    // The input bridge must never break the fixed step.
+  }
+}
+
 // Live shake flag, polled every tick and never cached (settings.gd poll
 // idiom): the probe namespace first (dual vocabulary: the probe may use
 // `camera_shake` snake_case or the shakeEnabled/shake_enabled twins),
@@ -997,6 +1114,11 @@ export function worldTick(dt: number): void {
       // Traffic must never break the fixed step.
     }
   }
+  // Player-input bridge: the polled keyboard/gamepad table lands in
+  // the live vehicle inputs in place on every fixed tick, immediately
+  // before the vehicle step, so held pedals drive physics. Never gated
+  // on race state; harmless before initDrive (no vehicle, no-op).
+  syncPlayerInputs();
   if (vehicle !== null) {
     vehicle.step(dt);
   }
