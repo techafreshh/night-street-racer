@@ -58,6 +58,57 @@
         font-size: 14px;
         color: #bbb;
       }
+      #ui section[id^="screen-"] {
+        pointer-events: auto;
+        background: rgba(10, 10, 18, 0.85);
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 24px 32px;
+        text-align: center;
+        max-height: 90vh;
+        overflow: auto;
+      }
+      #ui section[id^="screen-"] h1 {
+        margin: 0 0 16px;
+        font-size: 28px;
+        letter-spacing: 1px;
+      }
+      #ui section[id^="screen-"] button {
+        display: block;
+        width: 220px;
+        margin: 8px auto;
+        padding: 10px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      #ui section[id^="screen-"] button:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      #ui section[id^="screen-"] input[type="range"] {
+        display: block;
+        width: 220px;
+        margin: 8px auto;
+      }
+      #ui section[id^="screen-"] input[type="checkbox"] {
+        display: block;
+        width: 20px;
+        height: 20px;
+        margin: 8px auto;
+      }
+      #screen-pause {
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.6);
+        pointer-events: auto;
+      }
+      #screen-pause[hidden] {
+        display: none;
+      }
       #hud {
         position: fixed;
         top: 12px;
