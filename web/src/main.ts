@@ -26,6 +26,14 @@ import {
   type CameraPose,
   type CameraSample,
 } from "./vehicles/camera";
+import { VehicleFX, type FxSample } from "./vehicles/fx";
+import {
+  createBrakeLightMaterial,
+  ensureFlashOverlay,
+  HingeFlash,
+  syncBrakeLight,
+  syncFlashOverlay,
+} from "./render/effects";
 import {
   SAVE_KEY,
   SAVE_VERSION,
@@ -167,6 +175,7 @@ declare global {
       hud: hud.HudNamespace;
       audio: AudioNamespace;
       minimap: minimap.MinimapNamespace;
+      fx: FxNamespace;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
@@ -344,6 +353,158 @@ function publishLighting(): LightingNamespace {
   };
 }
 
+// Probe-facing FX namespace: the shared VehicleFX instance (pooled smoke,
+// skid ring, snap brake lights) plus the hinge-flash level, behind live
+// getters so black-box probes read the same numbers the tests pin through
+// window.__nsr.fx on the running service (publishTraffic idiom: one bound
+// handle per method, shared by both casings).
+export type FxNamespace = {
+  instance: VehicleFX;
+  smoke: {
+    readonly activeCount: number;
+    readonly active_count: number;
+    clear: () => void;
+  };
+  skids: { readonly segmentCount: number; readonly segment_count: number };
+  skidMarks: { readonly segmentCount: number; readonly segment_count: number };
+  brake: {
+    readonly emissiveIntensity: number;
+    readonly emissive_intensity: number;
+    readonly material: THREE.MeshStandardMaterial;
+  };
+  brakeLights: {
+    readonly emissiveIntensity: number;
+    readonly emissive_intensity: number;
+    readonly material: THREE.MeshStandardMaterial;
+  };
+  readonly brakeMaterial: THREE.MeshStandardMaterial;
+  readonly brake_material: THREE.MeshStandardMaterial;
+  readonly flash: HingeFlash;
+  readonly flashLevel: number;
+  readonly flash_level: number;
+  update: (dt: number, sample?: FxSample) => void;
+  reset: () => void;
+  clear: () => void;
+  forceSlip: boolean;
+  force_slip: boolean;
+};
+
+// Shared FX instance stepped by worldTick (module handle, same reference
+// the probe namespace publishes).
+let fxInstance: VehicleFX | null = null;
+// Hinge flash decayed by worldTick, kicked by race state transitions.
+const fxFlash = new HingeFlash();
+// Probe brake-light material synced from the FX brakes every tick.
+let fxBrakeMaterial: THREE.MeshStandardMaterial | null = null;
+// Hinge-flash DOM overlay (null until boot wires the document).
+let flashElement: HTMLElement | null = null;
+
+function ensureFx(): VehicleFX {
+  if (fxInstance === null) {
+    fxInstance = new VehicleFX();
+  }
+  return fxInstance;
+}
+
+function ensureBrakeMaterial(): THREE.MeshStandardMaterial {
+  if (fxBrakeMaterial === null) {
+    fxBrakeMaterial = createBrakeLightMaterial();
+  }
+  return fxBrakeMaterial;
+}
+
+// Construct the FX probe namespace over the shared instance (live
+// getters, same-instance references, dual-casing aliases).
+function publishFx(): FxNamespace {
+  const instance = ensureFx();
+  const material = ensureBrakeMaterial();
+  const update = (dt: number, sample?: FxSample): void => {
+    instance.update(dt, sample ?? {});
+    try {
+      syncBrakeLight(material, instance.brakes);
+    } catch {
+      // Probes must never break stepping.
+    }
+  };
+  const reset = (): void => {
+    instance.reset();
+    try {
+      syncBrakeLight(material, instance.brakes);
+    } catch {
+      // Probes must never break stepping.
+    }
+  };
+  const clear = (): void => {
+    instance.clear();
+  };
+  const smoke = {
+    get activeCount(): number {
+      return instance.smoke.activeCount;
+    },
+    get active_count(): number {
+      return instance.smoke.activeCount;
+    },
+    clear,
+  };
+  const skids = {
+    get segmentCount(): number {
+      return instance.skids.segmentCount;
+    },
+    get segment_count(): number {
+      return instance.skids.segmentCount;
+    },
+  };
+  const brake = {
+    get emissiveIntensity(): number {
+      return instance.brakes.emissiveIntensity;
+    },
+    get emissive_intensity(): number {
+      return instance.brakes.emissiveIntensity;
+    },
+    get material(): THREE.MeshStandardMaterial {
+      return ensureBrakeMaterial();
+    },
+  };
+  return {
+    instance,
+    smoke,
+    skids,
+    skidMarks: skids,
+    brake,
+    brakeLights: brake,
+    get brakeMaterial(): THREE.MeshStandardMaterial {
+      return ensureBrakeMaterial();
+    },
+    get brake_material(): THREE.MeshStandardMaterial {
+      return ensureBrakeMaterial();
+    },
+    get flash(): HingeFlash {
+      return fxFlash;
+    },
+    get flashLevel(): number {
+      return fxFlash.level;
+    },
+    get flash_level(): number {
+      return fxFlash.level;
+    },
+    update,
+    reset,
+    clear,
+    get forceSlip(): boolean {
+      return instance.forceSlip;
+    },
+    set forceSlip(value: boolean) {
+      instance.forceSlip = value;
+    },
+    get force_slip(): boolean {
+      return instance.forceSlip;
+    },
+    set force_slip(value: boolean) {
+      instance.forceSlip = value;
+    },
+  };
+}
+
 type BootEvents = {
   boot: string;
   menu: string;
@@ -428,16 +589,33 @@ function readLookBack(): boolean {
 }
 
 // Live shake flag, polled every tick and never cached (settings.gd poll
-// idiom): the probe namespace first, then the settings singleton.
+// idiom): the probe namespace first (dual vocabulary: the probe may use
+// `camera_shake` snake_case or the shakeEnabled/shake_enabled twins),
+// then the settings singleton.
 function readShakeEnabled(): boolean {
   try {
     if (typeof window !== "undefined") {
       const probe = (
-        window as unknown as { __nsr?: { settings?: { cameraShake?: unknown } } }
+        window as unknown as {
+          __nsr?: { settings?: Record<string, unknown> };
+        }
       ).__nsr;
-      const flag = probe?.settings?.cameraShake;
-      if (typeof flag === "boolean") {
-        return flag;
+      const bag = probe?.settings;
+      if (bag !== undefined && bag !== null) {
+        // Snake_case first: `camera_shake` is an expando on the store
+        // while `cameraShake` is a live getter, so the probe spelling
+        // must win over the singleton default.
+        const candidates = [
+          bag.camera_shake,
+          bag.cameraShake,
+          bag.shake_enabled,
+          bag.shakeEnabled,
+        ];
+        for (const candidate of candidates) {
+          if (typeof candidate === "boolean") {
+            return candidate;
+          }
+        }
       }
     }
   } catch {
@@ -520,6 +698,51 @@ export function worldTick(dt: number): void {
       lookBack: readLookBack(),
       shakeEnabled: readShakeEnabled(),
     });
+  }
+  // FX sink: samples the live car (slip/speed/brake/grounded) into the
+  // shared VehicleFX instance, syncs the probe brake material, and
+  // decays the hinge flash. FX never reads the shake flag (it never
+  // shakes the camera itself). Guarded so FX never breaks the step.
+  try {
+    const fxLive = ensureFx();
+    const car = vehicle ?? windowNSRVehicle();
+    let slip = 0;
+    let speed = 0;
+    let braking = false;
+    let grounded = true;
+    if (car !== null) {
+      try {
+        const state = car.getState();
+        slip = state.slipIntensity;
+        speed = state.speedMs;
+        grounded = state.isGrounded;
+        const pedal = car.inputs.brake;
+        braking = typeof pedal === "number" && pedal > 0.05;
+      } catch {
+        // Keep the parked defaults; FX never breaks stepping.
+      }
+    }
+    if (!braking) {
+      try {
+        braking = input.state.brake > 0.05;
+      } catch {
+        braking = false;
+      }
+    }
+    fxLive.update(dt, { slip, speed, brake: braking, grounded });
+    try {
+      syncBrakeLight(ensureBrakeMaterial(), fxLive.brakes);
+    } catch {
+      // The brake material must never break the fixed step.
+    }
+    try {
+      fxFlash.update(dt);
+      syncFlashOverlay(flashElement, fxFlash.level);
+    } catch {
+      // The hinge flash must never break the fixed step.
+    }
+  } catch {
+    // FX must never break the fixed step.
   }
   if (lightRig !== null) {
     try {
@@ -1239,6 +1462,11 @@ function boot(): void {
   } catch {
     // The minimap canvas is additive; the menu stays without it.
   }
+  try {
+    flashElement = ensureFlashOverlay(document);
+  } catch {
+    flashElement = null;
+  }
   bootEvents.emit("menu", "menu-ready");
   // The menu renders from DOM regardless of WebGL availability so the
   // page is usable even when headless Chromium lacks a GPU.
@@ -1271,6 +1499,16 @@ function boot(): void {
       raceEmitter.emit("onRaceStateChanged", { state });
     } catch {
       // Signal faults must never break boot.
+    }
+    // Countdown/finish hinge flash: kick the FX flash level on the
+    // state transitions (the raceEmitter forward above stays first).
+    // Guarded so flash faults never break the fixed step.
+    if (state === "countdown" || state === "finished") {
+      try {
+        fxFlash.flash();
+      } catch {
+        // The flash must never break the race.
+      }
     }
     // Finished while the race screen is up: hand the standings to the
     // results screen (race.gd _on_finished scene-change idiom) so a
@@ -1383,6 +1621,7 @@ function boot(): void {
     hud: publishHud(),
     audio: publishAudio(),
     minimap: publishMinimap(),
+    fx: publishFx(),
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
