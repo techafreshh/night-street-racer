@@ -16,7 +16,8 @@ import {
   type LaneLoop,
   type Vec3,
 } from "../data/lanePaths";
-import { STEP_DT, yawToQuat } from "../physics/world";
+import { STEP_DT } from "../core/loop";
+import { yawToQuat } from "../physics/vec";
 
 // Full Rapier module surface (the default export of
 // @dimforge/rapier3d-compat once initialized via RAPIER.init()).
