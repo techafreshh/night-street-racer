@@ -112,12 +112,14 @@ import { createFog, loadEnvironment } from "./render/sky";
 import { Traffic, sharedTraffic, type CarState, type TrafficCar } from "./traffic/traffic";
 import * as hud from "./ui/hud";
 import * as minimap from "./ui/minimap";
-import { renderEventSelect } from "./ui/eventSelect";
-import { renderGarage } from "./ui/garage";
 import { renderMenu } from "./ui/menu";
 import { attachPause } from "./ui/pause";
-import { renderResults } from "./ui/results";
-import { renderSettings } from "./ui/settings";
+import {
+  failLoading,
+  hideLoading,
+  renderLoading,
+  setLoadingProgress,
+} from "./ui/loading";
 import { getEvent } from "./data/events";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
@@ -1588,22 +1590,161 @@ function publishCamera(): CameraNamespace {
   };
 }
 
-function boot(): void {
+// Code-split screen loader: dynamic-import()s the module on first
+// navigation and caches the promise, so the entry chunk carries only
+// the menu while event-select/garage/settings/results split out. The
+// cached path paints synchronously (eager semantics); the in-flight
+// path paints on resolve only while the target screen is still showing.
+// Never throws.
+function lazyScreen(
+  router: Router,
+  name: string,
+  importer: () => Promise<Record<string, unknown>>,
+  render: string,
+): (container: HTMLElement) => void {
+  let cached: Record<string, unknown> | null = null;
+  let pending: Promise<Record<string, unknown>> | null = null;
+  let ticket = 0;
+  return (container: HTMLElement): void => {
+    try {
+      const mine = (ticket += 1);
+      if (cached !== null) {
+        try {
+          const paint = cached[render];
+          if (typeof paint === "function") {
+            (paint as (c: HTMLElement, r?: Router | null) => void)(
+              container,
+              router,
+            );
+          }
+        } catch {
+          // Screen faults never break routing.
+        }
+        return;
+      }
+      if (pending === null) {
+        try {
+          pending = importer();
+        } catch {
+          pending = null;
+        }
+      }
+      if (pending === null) {
+        return;
+      }
+      void pending.then(
+        (mod) => {
+          try {
+            cached = mod;
+            if (mine !== ticket || router.current() !== name) {
+              return;
+            }
+            const paint = mod[render];
+            if (typeof paint === "function") {
+              (paint as (c: HTMLElement, r?: Router | null) => void)(
+                container,
+                router,
+              );
+            }
+          } catch {
+            // Screen faults never break routing.
+          }
+        },
+        (error) => {
+          // Chunk failure must never stall silently: release the gate so the
+          // next visit retries, and log via the shared named-error sink.
+          pending = null;
+          try {
+            loaders.reportMissing(`screen:${name}`, error);
+          } catch {
+            // Logging faults never break routing.
+          }
+        },
+      );
+    } catch {
+      // Screen faults never break routing.
+    }
+  };
+}
+
+async function boot(): Promise<void> {
+  try {
+    renderLoading();
+  } catch {
+    // The static shell already paints without JS.
+  }
+  try {
+    setLoadingProgress(5, "Starting…");
+  } catch {
+    // Progress faults never break boot.
+  }
   const ui = document.getElementById("ui");
   if (ui === null) {
+    try {
+      failLoading("Boot failed", "missing #ui");
+    } catch {
+      // The error line is best-effort without a shell.
+    }
     return;
   }
   const router = new Router(ui);
   router.register("menu", (container) => renderMenu(container, router));
-  router.register("event-select", (container) =>
-    renderEventSelect(container, router),
+  router.register(
+    "event-select",
+    lazyScreen(router, "event-select", () => import("./ui/eventSelect"), "renderEventSelect"),
   );
-  router.register("garage", (container) => renderGarage(container, router));
-  router.register("settings", (container) =>
-    renderSettings(container, router),
+  router.register(
+    "garage",
+    lazyScreen(router, "garage", () => import("./ui/garage"), "renderGarage"),
   );
-  router.register("results", (container) => renderResults(container, router));
+  router.register(
+    "settings",
+    lazyScreen(router, "settings", () => import("./ui/settings"), "renderSettings"),
+  );
+  router.register(
+    "results",
+    lazyScreen(router, "results", () => import("./ui/results"), "renderResults"),
+  );
   router.register("race", renderRace);
+  // Staged boot: Rapier init first (compat embed, no fetch), then the
+  // asset-manifest cache warm. Either stage advances the bar; a fatal
+  // Rapier failure names the error and stops before the menu so the
+  // stall is never blank.
+  try {
+    await ensureRapierReady();
+  } catch (error) {
+    try {
+      failLoading("Rapier initialization failed", error);
+    } catch {
+      // The error line is best-effort.
+    }
+    return;
+  }
+  try {
+    setLoadingProgress(50, "Physics ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  try {
+    await loaders.fetchAssetManifest((done, total) => {
+      try {
+        const frac = total > 0 ? done / total : 1;
+        setLoadingProgress(
+          50 + Math.round(frac * 30),
+          `Loading assets ${done}/${total}`,
+        );
+      } catch {
+        // Progress faults never break the warm.
+      }
+    });
+  } catch {
+    // The manifest never rejects; missing entries only warn.
+  }
+  try {
+    setLoadingProgress(80, "Assets ready");
+  } catch {
+    // Progress faults never break boot.
+  }
   router.show("menu");
   try {
     attachPause(ui, router);
@@ -1843,6 +1984,21 @@ function boot(): void {
     minimap: publishMinimap(),
     fx: publishFx(),
   };
+  try {
+    setLoadingProgress(95, "Scene ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  try {
+    setLoadingProgress(100, "Ready");
+  } catch {
+    // Progress faults never break boot.
+  }
+  try {
+    hideLoading();
+  } catch {
+    // Hide faults never break boot.
+  }
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
   input.attach();
@@ -1915,7 +2071,9 @@ function boot(): void {
 }
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", boot);
+  document.addEventListener("DOMContentLoaded", () => {
+    void boot();
+  });
 } else {
-  boot();
+  void boot();
 }

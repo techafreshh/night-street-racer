@@ -189,3 +189,60 @@ export function validateAssets(manifest?: readonly string[]): boolean {
 
 // Godot-name alias so harness wording cannot mismatch (same reference).
 export const validate_assets = validateAssets;
+
+// Stock asset manifest: the same lane list validateAssets checks (audio
+// plus car plus city lanes served from the static dir). Single source
+// of truth for the boot-time cache warm in main.ts.
+export const ASSET_MANIFEST: readonly string[] = [
+  ...AUDIO_FILES.map((f) => `${ASSET_BASE}/audio/${f}`),
+  ...CAR_FILES.map((f) => `${ASSET_BASE}/${f}`),
+  ...CITY_FILES.map((f) => `${ASSET_BASE}/${f}`),
+];
+
+// Godot-name alias so harness wording cannot mismatch (same reference).
+export const asset_manifest = ASSET_MANIFEST;
+
+// Manifest fetch result: warmed URLs plus the missing ones.
+export type ManifestResult = {
+  ok: string[];
+  missing: string[];
+  total: number;
+};
+
+// Typed writer: GET each manifest URL to warm the HTTP cache, calling
+// onProgress after every entry with the (done, total) fraction. Missing
+// entries log via the shared reportMissing sink and never reject: the
+// promise always resolves { ok, missing, total } so a late or absent
+// static never breaks boot.
+export async function fetchAssetManifest(
+  onProgress?: (done: number, total: number) => void,
+): Promise<ManifestResult> {
+  const ok: string[] = [];
+  const missing: string[] = [];
+  const total = ASSET_MANIFEST.length;
+  let done = 0;
+  for (const entry of ASSET_MANIFEST) {
+    try {
+      const response = await fetch(entry);
+      if (response !== null && response !== undefined && response.ok) {
+        ok.push(entry);
+      } else {
+        missing.push(entry);
+        reportMissing(entry);
+      }
+    } catch (error) {
+      missing.push(entry);
+      reportMissing(entry, error);
+    }
+    done += 1;
+    try {
+      onProgress?.(done, total);
+    } catch {
+      // Progress faults never break the warm.
+    }
+  }
+  return { ok, missing, total };
+}
+
+// Godot-name alias so harness wording cannot mismatch (same reference).
+export const fetch_asset_manifest = fetchAssetManifest;
