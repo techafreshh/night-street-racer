@@ -1,9 +1,13 @@
 // Budget gate (mirrors scripts/smoke.mjs non-zero-exit convention):
 // weighs every file under dist/assets gzipped in-process, prints
 // `budget: <sum> / 15728640 bytes gz`, and exits non-zero with the five
-// largest offenders on stderr when the total exceeds 15 MB. Any I/O
-// failure (missing dist, unreadable chunk) also exits non-zero with the
-// reason on stderr.
+// largest offenders on stderr when the total exceeds 15 MB. After the
+// total gate, parses dist/index.html for modulepreload hrefs and fails
+// non-zero with offenders on stderr when any preloaded chunk exceeds
+// 500 kB raw (Vite's default warning threshold): the entry must stay
+// lean via staged engine imports, so a reintroduced static engine
+// import fails the build here. Any I/O failure (missing dist,
+// unreadable chunk) also exits non-zero with the reason on stderr.
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,6 +16,11 @@ import { gzipSync } from "node:zlib";
 
 const BUDGET_BYTES = 15 * 1024 * 1024;
 const OFFENDERS_SHOWN = 5;
+// Per-preloaded-chunk raw cap (issue #243): Vite's default warning
+// threshold. Only modulepreload hrefs count: intentionally-lazy vendor
+// chunks may exceed it without failing (they print non-failing Vite
+// warnings), but the initial payload must not.
+const PRELOAD_BYTES = 500 * 1024;
 
 function fail(reason) {
   console.error(`budget: ${reason}`);
@@ -77,6 +86,53 @@ function main() {
     }
     process.exit(1);
   }
+  checkPreloadBudget(here);
+}
+
+function checkPreloadBudget(here) {
+  const distDir = join(here, "..", "dist");
+  const indexFile = join(distDir, "index.html");
+  let html;
+  try {
+    html = readFileSync(indexFile, "utf8");
+  } catch (err) {
+    fail(`cannot read ${indexFile}: ${err.message}`);
+  }
+  const hrefs = [];
+  const preloadPattern = /<link[^>]+rel="modulepreload"[^>]*>/g;
+  let tag;
+  while ((tag = preloadPattern.exec(html)) !== null) {
+    const hrefMatch = /href="([^"]+)"/.exec(tag[0]);
+    if (hrefMatch !== null) {
+      hrefs.push(hrefMatch[1]);
+    }
+  }
+  const offenders = [];
+  for (const href of hrefs) {
+    const assetPath = href.startsWith("/") ? href.slice(1) : href;
+    const file = join(distDir, assetPath);
+    let bytes;
+    try {
+      bytes = readFileSync(file);
+    } catch (err) {
+      fail(`cannot read preloaded chunk ${file}: ${err.message}`);
+    }
+    if (bytes.length > PRELOAD_BYTES) {
+      offenders.push({ file, raw: bytes.length });
+    }
+  }
+  if (offenders.length > 0) {
+    offenders.sort((a, b) => b.raw - a.raw);
+    for (const entry of offenders) {
+      console.error(
+        `budget: preloaded chunk over budget ${entry.raw} bytes raw ${entry.file}`,
+      );
+    }
+    process.exit(1);
+  }
+  console.log(
+    `budget: preload ok (${hrefs.length} modulepreload links under ${PRELOAD_BYTES} bytes raw)`,
+  );
 }
 
 main();

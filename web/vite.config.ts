@@ -55,12 +55,16 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     assetsInlineLimit: 0,
-    // Loading-budget ceiling (issue #226): the entry chunk stays lean
-    // via code-split screens in main.ts; the two heavy static imports
-    // split into vendor chunks. assetsInlineLimit is 0 (see above),
-    // which is safe here because the -compat WASM is already
-    // base64-embedded same-origin with zero fetch.
-    chunkSizeWarningLimit: 15000,
+    // Loading-budget ceiling (issue #243): the entry chunk stays lean
+    // via staged engine imports in main.ts (menu paints with zero engine
+    // bytes); the two heavy lazy chunks split into vendor chunks.
+    // assetsInlineLimit is 0 (see above), which is safe here because
+    // the -compat WASM is already base64-embedded same-origin with
+    // zero fetch. The 500 kB tripwire stays honest (Vite default):
+    // overweight intentionally-lazy vendor chunks may still print
+    // non-failing warnings, while scripts/check-budget.mjs is the
+    // failing gate on preloaded chunks.
+    chunkSizeWarningLimit: 500,
     reportCompressedSize: true,
     rollupOptions: {
       output: {

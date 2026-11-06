@@ -7,7 +7,15 @@
 // missing files. Importing this module stays Node-safe: three.js math
 // only at the top level, GLTFLoader via dynamic import on the async
 // path, no DOM/WebGL/WASM at import time.
-import * as THREE from "three";
+import type * as THREE from "three";
+
+// Engine values without a static engine edge (chunk-budget split): the
+// entry and garage/result lazy chunks load this module with no vendor
+// weight; Box3/Vector3 resolve from the dynamic vendor-three chunk on
+// first normalization. Top-level await keeps normalizeScale synchronous
+// for its callers (loadGLB, loaders.test.ts) while the three.js edge
+// stays dynamic so dist/index.html carries no vendor modulepreload.
+const { Box3, Vector3 } = await import("three");
 
 // Static asset base served by Vite from web/public/assets.
 export const ASSET_BASE = "/assets";
@@ -88,12 +96,12 @@ export function normalizeScale(
         ? targetHeight
         : DEFAULT_TARGET_HEIGHT;
     object.updateWorldMatrix(true, true);
-    const box = new THREE.Box3().setFromObject(object);
+    const box = new Box3().setFromObject(object);
     if (box.isEmpty()) {
       console.error("[loaders] missing asset: degenerate object has no bounds");
       return 1;
     }
-    const size = box.getSize(new THREE.Vector3());
+    const size = box.getSize(new Vector3());
     const height = size.y;
     if (!Number.isFinite(height) || height <= 1e-9) {
       console.error("[loaders] missing asset: degenerate object height");

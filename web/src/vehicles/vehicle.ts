@@ -12,14 +12,14 @@
 import type RAPIER from "@dimforge/rapier3d-compat";
 import type { CarTune } from "../data/tunes";
 import { ASSISTS_ON, correctSteer, dampSlip } from "./assists";
+import { STEP_DT } from "../core/loop";
+import { PhysicsWorld } from "../physics/world";
 import {
   IDENTITY_QUAT,
-  PhysicsWorld,
   RESET_CLEAR_EXTENTS,
   RESET_LATERAL_RADII,
   RESET_LIFT_MAX,
   RESET_PROBE_OFFSET,
-  STEP_DT,
   add,
   cross,
   dot,
@@ -31,7 +31,7 @@ import {
   yawToQuat,
   type Quat,
   type Vec3,
-} from "../physics/world";
+} from "../physics/vec";
 
 // --- Suspension (per wheel) ---
 export const SPRING_RATE = 36000.0;
