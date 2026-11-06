@@ -20,6 +20,7 @@ import {
 import { input, type PlayerInput } from "./vehicles/input";
 import {
   ChaseCamera,
+  FOV_MIN,
   fovForSpeed,
   lagWeight,
   shakeOffset,
@@ -1487,7 +1488,7 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
   scene.background = new THREE.Color(0x0a0a12);
   scene.fog = createFog();
   const camera = new THREE.PerspectiveCamera(
-    fovForSpeed(0),
+    FOV_MIN,
     window.innerWidth / window.innerHeight,
     0.1,
     1000,
