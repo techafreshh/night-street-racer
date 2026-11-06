@@ -144,3 +144,113 @@ export function applyResult(
     carUnlocked,
   };
 }
+
+// Snapshot of completed events from one loadSave (Godot
+// progression.unlocked_events idiom). Never throws.
+export function unlockedEvents(
+  storage: StorageAdapter = getDefaultStorage(),
+): string[] {
+  try {
+    return stringList(loadSave(storage).progress.unlocked_events);
+  } catch {
+    return [];
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const unlocked_events = unlockedEvents;
+
+// Snapshot of earned cars from one loadSave (Godot
+// progression.unlocked_cars idiom). Never throws.
+export function unlockedCars(
+  storage: StorageAdapter = getDefaultStorage(),
+): string[] {
+  try {
+    return stringList(loadSave(storage).progress.unlocked_cars);
+  } catch {
+    return [];
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const unlocked_cars = unlockedCars;
+
+// Lock rule over a snapshot (Progression.is_unlocked_with idiom): an
+// empty unlock_req is open from the start, otherwise the requirement
+// must sit in the list. Pass an explicit list to reuse one snapshot;
+// otherwise a single loadSave snapshot is read. Never throws.
+export function isUnlockedWith(
+  unlockReq: unknown,
+  unlocked?: unknown,
+  storage: StorageAdapter = getDefaultStorage(),
+): boolean {
+  try {
+    if (typeof unlockReq !== "string" || unlockReq === "") {
+      return true;
+    }
+    const list = Array.isArray(unlocked)
+      ? stringList(unlocked)
+      : unlockedEvents(storage);
+    return list.includes(unlockReq);
+  } catch {
+    return false;
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const is_unlocked_with = isUnlockedWith;
+
+// Event-open predicate over the ladder chain (menu.gd grid idiom): the
+// first rung is always open, later rungs open once the previous rung
+// sits in the snapshot. Unknown or empty ids stay locked. Never throws.
+export function isEventUnlocked(
+  eventId: unknown,
+  unlocked?: unknown,
+  storage: StorageAdapter = getDefaultStorage(),
+): boolean {
+  try {
+    if (typeof eventId !== "string" || eventId === "") {
+      return false;
+    }
+    const idx = LADDER.indexOf(eventId);
+    if (idx < 0) {
+      return false;
+    }
+    if (idx === 0) {
+      return true;
+    }
+    return isUnlockedWith(LADDER[idx - 1] ?? "", unlocked, storage);
+  } catch {
+    return false;
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const is_event_unlocked = isEventUnlocked;
+
+// Car-open predicate (garage.gd is_car_unlocked_with idiom): the sedan
+// is always open, others open once earned into the snapshot. Never
+// throws.
+export function isCarUnlockedWith(
+  carId: unknown,
+  unlocked?: unknown,
+  storage: StorageAdapter = getDefaultStorage(),
+): boolean {
+  try {
+    if (carId === "sedan") {
+      return true;
+    }
+    if (typeof carId !== "string" || carId === "") {
+      return false;
+    }
+    const list = Array.isArray(unlocked)
+      ? stringList(unlocked)
+      : unlockedCars(storage);
+    return list.includes(carId);
+  } catch {
+    return false;
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const is_car_unlocked_with = isCarUnlockedWith;

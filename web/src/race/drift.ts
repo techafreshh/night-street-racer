@@ -87,3 +87,32 @@ export function scoreDrift(
   }
   return scoreDelta((slipRad * 180.0) / Math.PI, speedMs, delta);
 }
+
+// Disk-free judged-run best read over a records table
+// ({eventId: {best_drift_score, ...}}): the truncated whole-int best when
+// present, otherwise 0 (absent, corrupt, non-numeric). Never throws,
+// never touches storage (the game/records owner injects the table).
+export function bestFromTable(table: unknown, eventId: string): number {
+  try {
+    if (typeof eventId !== "string" || eventId === "") {
+      return 0;
+    }
+    if (table === null || typeof table !== "object" || Array.isArray(table)) {
+      return 0;
+    }
+    const entry = (table as Record<string, unknown>)[eventId];
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return 0;
+    }
+    const score = (entry as Record<string, unknown>).best_drift_score;
+    if (typeof score !== "number" || !Number.isFinite(score)) {
+      return 0;
+    }
+    return Math.trunc(score);
+  } catch {
+    return 0;
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const best_from_table = bestFromTable;

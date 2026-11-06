@@ -49,9 +49,15 @@ import {
   applyResult,
   canUnlockNext,
   carReward,
+  isCarUnlockedWith,
+  isEventUnlocked,
+  isUnlockedWith,
   mappedCar,
   nextEventAfter,
+  unlockedCars,
+  unlockedEvents,
 } from "./game/progression";
+import * as recordsApi from "./game/records";
 import { SettingsStore, settings } from "./game/settings";
 import {
   audio as audioManager,
@@ -154,7 +160,14 @@ declare global {
         canUnlockNext: typeof canUnlockNext;
         carReward: typeof carReward;
         applyResult: typeof applyResult;
+        unlockedEvents: typeof unlockedEvents;
+        unlockedCars: typeof unlockedCars;
+        isUnlockedWith: typeof isUnlockedWith;
+        isEventUnlocked: typeof isEventUnlocked;
+        isCarUnlockedWith: typeof isCarUnlockedWith;
       };
+      records: typeof recordsApi;
+      startRace: (eventId: string) => void;
       settings: SettingsStore;
       gameState: GameState;
       input: PlayerInput;
@@ -667,6 +680,39 @@ export function worldTick(dt: number): void {
     }
   } catch {
     // The race flow must never break the fixed step.
+  }
+  // Judged-drift accrual: sample the live slip/speed into the
+  // HUD-held drift total while racing and pop the HUD drift readout
+  // on new whole points (drift_park judged-run idiom). Never throws.
+  try {
+    if (raceManager.state === "racing" && Number.isFinite(dt) && dt > 0) {
+      const live = vehicle ?? windowNSRVehicle();
+      let slipRad = 0;
+      let speedMs = 0;
+      if (live !== null) {
+        try {
+          const carState = live.getState();
+          slipRad = carState.slipIntensity;
+          speedMs = carState.speedMs;
+        } catch {
+          // Keep the parked defaults; drift never breaks stepping.
+        }
+      }
+      const gain = drift.scoreDrift(slipRad, speedMs, dt);
+      if (gain > 0) {
+        const before = Math.trunc(raceManager.driftTotal);
+        raceManager.driftTotal += gain;
+        if (Math.trunc(raceManager.driftTotal) > before) {
+          try {
+            hud.showDrift(Math.trunc(raceManager.driftTotal));
+          } catch {
+            // The drift readout never breaks the fixed step.
+          }
+        }
+      }
+    }
+  } catch {
+    // Drift accrual must never break the fixed step.
   }
   let carPos: Vec3 = { x: 0, y: 0, z: 0 };
   let carYaw = chase !== null ? chase.yaw : 0;
@@ -1528,6 +1574,7 @@ function boot(): void {
                   time_s: row.time_s,
                   place: row.place,
                 })),
+                drift_score: Math.max(0, Math.trunc(raceManager.driftTotal)),
               });
             } catch {
               // Handoff faults fall back to the results mock.
@@ -1549,6 +1596,43 @@ function boot(): void {
   };
   const city = publishCity();
   window.__city = city;
+  // Solo-aware race arming shared by the event flow and probes
+  // (time_trial arms a 1-racer field with no AI, race arms the full
+  // event field): the HUD-readable holders seed here from the stored
+  // best (null clears the delta) with a zeroed drift total.
+  const startRace = (eventId: string): void => {
+    try {
+      const id =
+        typeof eventId === "string" && eventId !== ""
+          ? eventId
+          : "harbor_sprint";
+      try {
+        gameState.selectEvent(id);
+      } catch {
+        // Selection faults never block arming.
+      }
+      const solo = gameState.isTimeTrialMode();
+      try {
+        raceManager.startEvent(id, solo ? 1 : undefined);
+      } catch {
+        raceManager.startEvent("harbor_sprint", solo ? 1 : undefined);
+      }
+      try {
+        raceManager.driftTotal = 0;
+        const stored = recordsApi.getBest(id);
+        raceManager.best = stored > 0 ? stored : null;
+      } catch {
+        // Holder faults never block arming.
+      }
+    } catch {
+      // Arming never throws.
+    }
+    try {
+      router.show("race");
+    } catch {
+      // Navigation faults never break arming.
+    }
+  };
   // Mirror the Godot autoload _ready reload: lenient-load the v1 save on
   // boot (read-only; writes happen only through setters plus flush()).
   loadSave();
@@ -1570,11 +1654,18 @@ function boot(): void {
       canUnlockNext,
       carReward,
       applyResult,
+      unlockedEvents,
+      unlockedCars,
+      isUnlockedWith,
+      isEventUnlocked,
+      isCarUnlockedWith,
     },
+    records: recordsApi,
+    startRace,
     settings,
     gameState,
     input,
-    race: { order, positions, drift, timetrial, manager: raceManager, route: raceRoute },
+    race: { order, positions, drift: { ...drift, ...recordsApi.driftApi }, timetrial: { ...timetrial, ...recordsApi.timetrialApi }, manager: raceManager, route: raceRoute },
     ai: {
       bakeRacingLine: racingLine.bakeRacingLine,
       bake_racing_line: racingLine.bake_racing_line,

@@ -55,3 +55,72 @@ export function isValidReward(reward: unknown): boolean {
     reward <= REWARD_MAX
   );
 }
+
+// Disk-free personal-best read over a records table
+// ({eventId: {best_time_s, ...}}): the float best when present and
+// positive, otherwise -1 (absent, corrupt, non-positive). Never throws,
+// never touches storage (the game/records owner injects the table).
+export function bestFromTable(table: unknown, eventId: string): number {
+  try {
+    if (typeof eventId !== "string" || eventId === "") {
+      return -1;
+    }
+    if (table === null || typeof table !== "object" || Array.isArray(table)) {
+      return -1;
+    }
+    const entry = (table as Record<string, unknown>)[eventId];
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      return -1;
+    }
+    const best = (entry as Record<string, unknown>).best_time_s;
+    if (typeof best !== "number" || !Number.isFinite(best) || best <= 0) {
+      return -1;
+    }
+    return best;
+  } catch {
+    return -1;
+  }
+}
+
+// v1 snake_case alias (same reference).
+export const best_from_table = bestFromTable;
+
+// Disk-free snapshot of every positive personal best ({eventId: best});
+// absent/corrupt tables yield {}, non-positive entries are skipped.
+// Never throws, never touches storage.
+export function allBestsFromTable(table: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  try {
+    if (table === null || typeof table !== "object" || Array.isArray(table)) {
+      return out;
+    }
+    for (const [key, entry] of Object.entries(
+      table as Record<string, unknown>,
+    )) {
+      if (key === "") {
+        continue;
+      }
+      if (
+        entry === null ||
+        typeof entry !== "object" ||
+        Array.isArray(entry)
+      ) {
+        continue;
+      }
+      const best = (entry as Record<string, unknown>).best_time_s;
+      if (
+        typeof best === "number" &&
+        Number.isFinite(best) &&
+        best > 0
+      ) {
+        out[key] = best;
+      }
+    }
+  } catch {
+    // Best effort: return whatever survived the scan.
+  }
+  return out;
+}
+
+// v1 snake_case alias (same reference).
+export const all_bests_from_table = allBestsFromTable;

@@ -212,6 +212,14 @@ export class RaceManager {
   event: unknown = null;
   eventId = "";
   racers: string[] = [];
+  // HUD-readable run holders (race.gd _cached_best idiom): plain data,
+  // never persisted here. best caches the personal best the HUD diffs the
+  // live clock against (null clears the delta); driftTotal accrues the
+  // judged score while racing. Preserved across step; cleared here and
+  // re-seeded by the caller (game/records reads) after startEvent or
+  // resetRace.
+  best: number | null = null;
+  driftTotal = 0;
   routes: RaceRoute[] = [];
   samples: CarPoint[] = [];
   radius = gateRadiusOf(null);
@@ -293,6 +301,8 @@ export class RaceManager {
     this.raceTime = 0;
     this.countdownLeft = COUNTDOWN_DURATION;
     this.results = null;
+    this.best = null;
+    this.driftTotal = 0;
     this.gateIndex = -1;
     this.currentLap = 0;
     this.wrongWay = false;
@@ -421,6 +431,8 @@ export class RaceManager {
     this.raceTime = 0;
     this.countdownLeft = COUNTDOWN_DURATION;
     this.results = null;
+    this.best = null;
+    this.driftTotal = 0;
     this.gateIndex = -1;
     this.currentLap = 0;
     this.wrongWay = false;
@@ -481,7 +493,8 @@ export class RaceManager {
   }
 
   private finishRace(): void {
-    this.emitState("finished");
+    // Stamp the full field first so state listeners (the main.ts
+    // results handoff) observe the populated table, then emit.
     const table = new RaceResults();
     for (const entry of this.standings) {
       table.recordFinish(String(entry.id), this.raceTime);
@@ -496,6 +509,7 @@ export class RaceManager {
       event_id: this.eventId,
       laps: this.totalLaps,
     };
+    this.emitState("finished");
   }
 
   private emitState(state: RaceState): void {
