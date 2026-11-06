@@ -81,6 +81,8 @@ import {
 import { createFog, loadEnvironment } from "./render/sky";
 import { Traffic, type CarState, type TrafficCar } from "./traffic/traffic";
 import * as hud from "./ui/hud";
+import * as minimap from "./ui/minimap";
+import { getEvent } from "./data/events";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
 import * as positions from "./race/positions";
@@ -141,6 +143,7 @@ declare global {
       lighting: LightingNamespace;
       loaders: typeof loaders;
       hud: hud.HudNamespace;
+      minimap: minimap.MinimapNamespace;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
     };
@@ -559,15 +562,38 @@ export function worldTick(dt: number): void {
   try {
     const live = vehicle ?? windowNSRVehicle();
     let sample: hud.HudVehicleSample | null = null;
+    let playerPos: { x: number; z: number } | null = null;
     if (live !== null) {
       try {
         const state = live.getState();
         sample = { speedMs: state.speedMs, currentGear: state.currentGear };
+        const anchor = state.position;
+        if (Number.isFinite(anchor.x) && Number.isFinite(anchor.z)) {
+          playerPos = { x: anchor.x, z: anchor.z };
+        }
       } catch {
         sample = null;
       }
     }
     hud.update({ vehicle: sample, race: hudRaceSnapshot() }, dt);
+    // Minimap sink: same guard, throttled to 10 Hz inside the module.
+    // Player reads the live vehicle XZ, rivals the race field behind
+    // the player sample, gates the armed event (downtown_gp fallback so
+    // the route face renders before a race arms).
+    try {
+      const manager = activeRaceManager();
+      let gates: unknown = manager?.gates ?? null;
+      if (!Array.isArray(gates) || gates.length === 0) {
+        gates = getEvent("downtown_gp")?.gates ?? null;
+      }
+      minimap.updateMinimap(dt, {
+        player: playerPos,
+        rivals: manager?.samples?.slice(1) ?? null,
+        gates,
+      });
+    } catch {
+      // The minimap must never break the fixed step.
+    }
   } catch {
     // The HUD must never break the fixed step.
   }
@@ -684,6 +710,39 @@ function publishHud(): hud.HudNamespace {
     attachRace: hud.attachRace,
     attach_race: hud.attach_race,
     DRIFT_FADE_TIME: hud.DRIFT_FADE_TIME,
+  };
+}
+
+// Probe-facing minimap namespace: the pure normalized-XZ math plus the
+// canvas sink, so black-box probes read the same projection and dot
+// numbers the tests pin through window.__nsr.minimap on the running
+// service (publishHud idiom).
+function publishMinimap(): minimap.MinimapNamespace {
+  return {
+    normalizeMinimap: minimap.normalizeMinimap,
+    normalize_minimap: minimap.normalize_minimap,
+    projectToMap: minimap.projectToMap,
+    project_to_map: minimap.project_to_map,
+    ensureMinimap: minimap.ensureMinimap,
+    ensure_minimap: minimap.ensure_minimap,
+    drawMinimap: minimap.drawMinimap,
+    draw_minimap: minimap.draw_minimap,
+    updateMinimap: minimap.updateMinimap,
+    update_minimap: minimap.update_minimap,
+    resetMinimapClock: minimap.resetMinimapClock,
+    reset_minimap_clock: minimap.reset_minimap_clock,
+    MAP_SIZE: minimap.MAP_SIZE,
+    map_size: minimap.map_size,
+    HALF_EXTENT: minimap.HALF_EXTENT,
+    half_extent: minimap.half_extent,
+    GATE_DOT: minimap.GATE_DOT,
+    gate_dot: minimap.gate_dot,
+    PLAYER_DOT: minimap.PLAYER_DOT,
+    player_dot: minimap.player_dot,
+    RIVAL_DOT: minimap.RIVAL_DOT,
+    rival_dot: minimap.rival_dot,
+    UPDATE_INTERVAL: minimap.UPDATE_INTERVAL,
+    update_interval: minimap.update_interval,
   };
 }
 
@@ -1072,6 +1131,11 @@ function boot(): void {
   } catch {
     // The HUD overlay is additive; the menu stays without it.
   }
+  try {
+    minimap.ensureMinimap(document);
+  } catch {
+    // The minimap canvas is additive; the menu stays without it.
+  }
   bootEvents.emit("menu", "menu-ready");
   // The menu renders from DOM regardless of WebGL availability so the
   // page is usable even when headless Chromium lacks a GPU.
@@ -1185,6 +1249,7 @@ function boot(): void {
     lighting: publishLighting(),
     loaders,
     hud: publishHud(),
+    minimap: publishMinimap(),
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
