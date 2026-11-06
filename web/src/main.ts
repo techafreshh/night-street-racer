@@ -689,8 +689,43 @@ const fpsMeter = createFpsMeter();
 let smokeMesh: THREE.InstancedMesh | null = null;
 let skidMesh: THREE.LineSegments | null = null;
 
-// Stored resize listener so double initScene leaves one listener.
-let sceneResizeHandler: (() => void) | null = null;
+// Scene resize teardown: drops the stored window resize listener so a
+// second initScene boot (HMR/tests) cannot stack a duplicate. Delegates
+// to the staged renderer helper (chunk-budget split: no static render
+// value import) and never throws, even before stage C lands.
+export function disposeScene(): void {
+  try {
+    try {
+      engine.rendererMod?.disposeSceneResize();
+    } catch {
+      // Disposal is best-effort.
+    }
+  } catch {
+    // Disposal never throws.
+  }
+}
+
+// HMR teardown: the module swap must not stack a listener across
+// reloads, so disposing on module dispose keeps exactly one live
+// resize listener. Guarded: plain browsers and vitest have no hot
+// runtime.
+try {
+  if (
+    typeof import.meta.hot !== "undefined" &&
+    import.meta.hot !== undefined &&
+    import.meta.hot !== null
+  ) {
+    import.meta.hot.dispose(() => {
+      try {
+        disposeScene();
+      } catch {
+        // HMR teardown never throws.
+      }
+    });
+  }
+} catch {
+  // No HMR runtime: nothing to dispose.
+}
 
 function ensureFx(): VehicleFX {
   if (fxInstance === null) {
@@ -1896,10 +1931,6 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
       // The rig holds the fog fallback without the HDRI.
     }
     try {
-      if (sceneResizeHandler !== null) {
-        window.removeEventListener("resize", sceneResizeHandler);
-        sceneResizeHandler = null;
-      }
       const stagedRenderer = rendererMod;
       const onResize = (): void => {
         try {
@@ -1915,13 +1946,26 @@ function initScene(canvas: HTMLCanvasElement): RenderScene {
           // Resizes must never break rendering.
         }
       };
-      sceneResizeHandler = onResize;
-      window.addEventListener("resize", onResize);
+      try {
+        stagedRenderer.disposeSceneResize();
+      } catch {
+        // Dispose is best-effort; attach replaces stale listeners.
+      }
+      try {
+        stagedRenderer.attachSceneResize(onResize);
+      } catch {
+        // Resize wiring is best-effort.
+      }
     } catch {
       // Resize wiring is best-effort.
     }
   } else {
     nightComposer = null;
+    try {
+      rendererMod.disposeSceneResize();
+    } catch {
+      // A null-renderer re-init still drops the stale listener.
+    }
   }
   const renderNow = (): void => {
     try {
