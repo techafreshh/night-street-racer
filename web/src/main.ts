@@ -46,6 +46,22 @@ import {
 } from "./game/progression";
 import { SettingsStore, settings } from "./game/settings";
 import {
+  audio as audioManager,
+  DUCK_DB as AUDIO_DUCK_DB,
+  DUCK_GAIN as AUDIO_DUCK_GAIN,
+  engineRate as audioEngineRate,
+  IDLE_RPM as AUDIO_IDLE_RPM,
+  levelToGain as audioLevelToGain,
+  MAX_ENGINE_RPM as AUDIO_MAX_ENGINE_RPM,
+  MUTE_FLOOR as AUDIO_MUTE_FLOOR,
+  SKID_FULL as AUDIO_SKID_FULL,
+  SKID_THRESHOLD as AUDIO_SKID_THRESHOLD,
+  skidGain as audioSkidGain,
+  WIND_FULL_SPEED as AUDIO_WIND_FULL_SPEED,
+  windGain as audioWindGain,
+  type AudioNamespace,
+} from "./game/audio";
+import {
   BLOCK_CENTERS,
   ROAD_CENTERLINES,
   addBarrierColliders,
@@ -149,6 +165,7 @@ declare global {
       lighting: LightingNamespace;
       loaders: typeof loaders;
       hud: hud.HudNamespace;
+      audio: AudioNamespace;
       minimap: minimap.MinimapNamespace;
       vehicle?: VehicleNamespace;
       physics?: PhysicsNamespace;
@@ -559,6 +576,31 @@ export function worldTick(dt: number): void {
   } catch {
     // The HUD must never break the fixed step.
   }
+  // Audio steer: engine RPM pitch, skid fade, and wind level from the
+  // live vehicle readout, plus a settings-volumes re-poll every tick
+  // (readShakeEnabled poll idiom). Guarded so audio never breaks the
+  // fixed step.
+  try {
+    const live = vehicle ?? windowNSRVehicle();
+    if (live !== null) {
+      try {
+        const state = live.getState();
+        const maxRpm = (live as unknown as { maxEngineRpm?: unknown })
+          .maxEngineRpm;
+        audioManager.update({
+          rpm: state.engineRpm,
+          maxRpm: typeof maxRpm === "number" ? maxRpm : undefined,
+          slip: state.slipIntensity,
+          speedMs: state.speedMs,
+        });
+      } catch {
+        audioManager.update(null);
+      }
+    }
+    audioManager.applyVolumes();
+  } catch {
+    // Audio must never break the fixed step.
+  }
 }
 
 let vehicle: Vehicle | null = null;
@@ -672,6 +714,92 @@ function publishHud(): hud.HudNamespace {
     attachRace: hud.attachRace,
     attach_race: hud.attach_race,
     DRIFT_FADE_TIME: hud.DRIFT_FADE_TIME,
+  };
+}
+
+// Probe-facing audio namespace: the live Web Audio mixer plus the pure
+// pitch/skid/wind maps, so black-box probes read the same numbers the
+// tests pin through window.__nsr.audio on the running service
+// (publishHud idiom: one bound handle per method, shared by both
+// casings so alias wording cannot mismatch).
+function publishAudio(): AudioNamespace {
+  const ensureContext = (): AudioContext | null => audioManager.ensureContext();
+  const applyVolumes = (): void => {
+    audioManager.applyVolumes();
+  };
+  const attachUnlock = (): void => {
+    audioManager.attachUnlock();
+  };
+  const unlock = (): void => {
+    audioManager.unlock();
+  };
+  const startMenuMusic = (): void => {
+    audioManager.startMenuMusic();
+  };
+  const duckMusicForRace = (): void => {
+    audioManager.duckMusicForRace();
+  };
+  const playClick = (): void => {
+    audioManager.playClick();
+  };
+  const updateAudio = (sample?: Parameters<AudioNamespace["update"]>[0]): void => {
+    audioManager.update(sample);
+  };
+  const disposeAudio = (): void => {
+    audioManager.dispose();
+  };
+  return {
+    instance: audioManager,
+    engineRate: audioEngineRate,
+    engine_rate: audioEngineRate,
+    engine_pitch: audioEngineRate,
+    skidGain: audioSkidGain,
+    skid_gain: audioSkidGain,
+    windGain: audioWindGain,
+    wind_gain: audioWindGain,
+    levelToGain: audioLevelToGain,
+    level_to_gain: audioLevelToGain,
+    ensureContext,
+    ensure_context: ensureContext,
+    applyVolumes,
+    apply_volumes: applyVolumes,
+    attachUnlock,
+    attach_unlock: attachUnlock,
+    unlock,
+    startMenuMusic,
+    start_menu_music: startMenuMusic,
+    duckMusicForRace,
+    duck_music_for_race: duckMusicForRace,
+    playClick,
+    play_click: playClick,
+    update: updateAudio,
+    dispose: disposeAudio,
+    get context(): AudioContext | null {
+      return audioManager.ctx;
+    },
+    get state(): string {
+      return audioManager.state;
+    },
+    get ducked(): boolean {
+      return audioManager.ducked;
+    },
+    get masterGainValue(): number {
+      return audioManager.masterGainValue;
+    },
+    get musicGainValue(): number {
+      return audioManager.musicGainValue;
+    },
+    get sfxGainValue(): number {
+      return audioManager.sfxGainValue;
+    },
+    IDLE_RPM: AUDIO_IDLE_RPM,
+    MAX_ENGINE_RPM: AUDIO_MAX_ENGINE_RPM,
+    SKID_THRESHOLD: AUDIO_SKID_THRESHOLD,
+    SKID_FULL: AUDIO_SKID_FULL,
+    WIND_FULL_SPEED: AUDIO_WIND_FULL_SPEED,
+    DUCK_DB: AUDIO_DUCK_DB,
+    DUCK_GAIN: AUDIO_DUCK_GAIN,
+    MUTE_FLOOR: AUDIO_MUTE_FLOOR,
   };
 }
 
@@ -1253,11 +1381,56 @@ function boot(): void {
     lighting: publishLighting(),
     loaders,
     hud: publishHud(),
+    audio: publishAudio(),
     minimap: publishMinimap(),
   };
   // Real keyboard feeds the shared table through window listeners;
   // the fixed step below re-polls every tick for gamepad state.
   input.attach();
+  // Audio unlock + volumes: attach the one-shot gesture listeners and
+  // poll the settings levels without resuming, so the context stays
+  // suspended until the first gesture (autoplay policy). Menu music
+  // starts best-effort; race phases duck/restore it; menu clicks fire
+  // the one-shot.
+  try {
+    audioManager.attachUnlock();
+    audioManager.applyVolumes();
+  } catch {
+    // Audio setup never breaks boot.
+  }
+  try {
+    audioManager.startMenuMusic();
+  } catch {
+    // Menu music is best effort without a gesture.
+  }
+  try {
+    raceEmitter.on("onRaceStateChanged", (payload) => {
+      try {
+        if (payload.state === "racing" || payload.state === "countdown") {
+          audioManager.duckMusicForRace();
+        } else {
+          audioManager.startMenuMusic();
+        }
+      } catch {
+        // Audio routing never breaks the race signal.
+      }
+    });
+  } catch {
+    // Race-phase ducking is additive; the menu stays without it.
+  }
+  try {
+    document.addEventListener("click", () => {
+      try {
+        if (router.current() !== "race") {
+          audioManager.playClick();
+        }
+      } catch {
+        // Clicks never break navigation.
+      }
+    });
+  } catch {
+    // Click sounds are additive; the menu stays without them.
+  }
   // Physics initializes asynchronously (WASM compile); the loop keeps
   // stepping the menu meanwhile and picks up the car once ready.
   void initDrive();
