@@ -1632,23 +1632,35 @@ function lazyScreen(
       if (pending === null) {
         return;
       }
-      void pending.then((mod) => {
-        try {
-          cached = mod;
-          if (mine !== ticket || router.current() !== name) {
-            return;
+      void pending.then(
+        (mod) => {
+          try {
+            cached = mod;
+            if (mine !== ticket || router.current() !== name) {
+              return;
+            }
+            const paint = mod[render];
+            if (typeof paint === "function") {
+              (paint as (c: HTMLElement, r?: Router | null) => void)(
+                container,
+                router,
+              );
+            }
+          } catch {
+            // Screen faults never break routing.
           }
-          const paint = mod[render];
-          if (typeof paint === "function") {
-            (paint as (c: HTMLElement, r?: Router | null) => void)(
-              container,
-              router,
-            );
+        },
+        (error) => {
+          // Chunk failure must never stall silently: release the gate so the
+          // next visit retries, and log via the shared named-error sink.
+          pending = null;
+          try {
+            loaders.reportMissing(`screen:${name}`, error);
+          } catch {
+            // Logging faults never break routing.
           }
-        } catch {
-          // Screen faults never break routing.
-        }
-      });
+        },
+      );
     } catch {
       // Screen faults never break routing.
     }
