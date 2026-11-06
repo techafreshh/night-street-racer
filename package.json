@@ -15,6 +15,8 @@
     "build": "npm run build --workspace=web",
     "serve": "npm run serve --workspace=web",
     "start": "npm run serve --workspace=web",
-    "smoke": "npm run smoke --workspace=web"
+    "smoke": "npm run smoke --workspace=web",
+    "test": "npm run test --workspace=web",
+    "e2e": "npm run e2e --workspace=web"
   }
 }
