@@ -91,9 +91,11 @@ import {
   grid,
   type GridBuildOpts,
   type GridPoint,
+  type GridPose,
   type RaceGrid,
   type RivalState,
 } from "./race/grid";
+import { placePlayerOnGrid } from "./race/placement";
 import * as raceRoute from "./race/route";
 import * as aiInputMod from "./ai/ai_input";
 import * as racingLine from "./ai/racing_line";
@@ -371,6 +373,8 @@ export type GridNamespace = {
   racers: string[];
   eventId: string;
   event_id: string;
+  playerStart: GridPose;
+  player_start: GridPose;
   build: (eventId: string, opts?: GridBuildOpts) => RaceGrid;
   advance: (dt?: number) => void;
   reset: () => void;
@@ -1041,6 +1045,17 @@ function syncPlayerInputs(): void {
     } catch {
       apply = null;
     }
+    // Godot can_drive idiom (event_manager.gd: racers poll can_drive):
+    // while a race is armed but the lights are not yet green, hold the
+    // car on its grid slot by zeroing the drive pedals after the copy,
+    // so a pre-green launch cannot blow past gate 0 before the manager
+    // samples it. Idle/finished phases are never gated. Never throws.
+    let holdForCountdown = false;
+    try {
+      holdForCountdown = raceManager.state === "countdown";
+    } catch {
+      holdForCountdown = false;
+    }
     for (const target of targets) {
       try {
         const inputs = target.inputs;
@@ -1051,6 +1066,12 @@ function syncPlayerInputs(): void {
           apply(inputs, source);
         } else {
           copyPlayerInputs(inputs, source);
+        }
+        if (holdForCountdown) {
+          inputs.throttle = 0;
+          inputs.brake = 0;
+          inputs.steer = 0;
+          inputs.handbrake = false;
         }
       } catch {
         // One torn car never breaks the sync of the other.
@@ -1491,6 +1512,12 @@ function publishGrid(): GridNamespace {
     },
     get event_id(): string {
       return grid.eventId;
+    },
+    get playerStart(): GridPose {
+      return grid.playerStart;
+    },
+    get player_start(): GridPose {
+      return grid.playerStart;
     },
     build,
     advance,
@@ -2464,6 +2491,14 @@ async function boot(): Promise<void> {
         armGridForEvent(effective, { carId, solo });
       } catch {
         // Grid faults never block arming.
+      }
+      // Player placement (race.gd _spawn_rivals idiom): pin the live
+      // body onto the shared grid slot once per arm so the car starts
+      // on the grid instead of the boot spawn. Guarded like arming.
+      try {
+        placePlayerOnGrid(vehicle ?? undefined);
+      } catch {
+        // Placement faults never block arming.
       }
       try {
         ensureTraffic().setActive(!solo);

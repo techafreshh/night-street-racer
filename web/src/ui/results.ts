@@ -24,6 +24,7 @@ import {
 import { gameState } from "../game/state";
 import { manager } from "../race/manager";
 import { armGridForEvent } from "../race/grid";
+import { placePlayerOnGrid } from "../race/placement";
 import { sharedTraffic } from "../traffic/traffic";
 import { formatTime } from "../race/timetrial";
 import { appendChild, menuButton, onPress, screenRoot, staticLine } from "./screens";
@@ -274,6 +275,13 @@ export function renderResults(
           armGridForEvent(effective, { carId, solo });
         } catch {
           // Grid faults never block navigation.
+        }
+        // Player placement mirrors main.ts startRace: pin the live body
+        // onto the shared grid slot once per retry. Guarded like arming.
+        try {
+          placePlayerOnGrid();
+        } catch {
+          // Placement faults never block navigation.
         }
         try {
           sharedTraffic().setActive(!solo);
