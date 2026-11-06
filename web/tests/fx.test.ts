@@ -31,7 +31,9 @@ import {
   SmokePool,
   SkidTrail,
   VehicleFX,
+  rearSkidAnchors,
 } from "../src/vehicles/fx";
+import { IDENTITY_QUAT, yawToQuat } from "../src/physics/vec";
 import { ChaseCamera, shakeOffset } from "../src/vehicles/camera";
 import {
   buildSkidMesh,
@@ -274,6 +276,55 @@ describe("render effects", () => {
     expect(validateEffectsConfig({ skidMax: 8 })).toBe(false);
     expect(validateEffectsConfig({ flashDecay: 99 })).toBe(false);
     expect(validate_effects_config).toBe(validateEffectsConfig);
+  });
+});
+
+describe("fx anchors", () => {
+  it("returns the rear WHEEL_MOUNTS pair at identity", () => {
+    const { left, right } = rearSkidAnchors(
+      { x: 10, y: 2, z: 30 },
+      IDENTITY_QUAT,
+    );
+    expect(left.x).toBeCloseTo(10 - 0.85, 6);
+    expect(left.y).toBeCloseTo(2, 6);
+    expect(left.z).toBeCloseTo(30 + 1.35, 6);
+    expect(right.x).toBeCloseTo(10 + 0.85, 6);
+    expect(right.y).toBeCloseTo(2, 6);
+    expect(right.z).toBeCloseTo(30 + 1.35, 6);
+  });
+
+  it("separates the rung along world z at 90 deg yaw", () => {
+    const { left, right } = rearSkidAnchors(
+      { x: 0, y: 0, z: 0 },
+      yawToQuat(Math.PI / 2),
+    );
+    expect(left.x).toBeCloseTo(right.x, 6);
+    expect(Math.abs(left.z - right.z)).toBeCloseTo(1.7, 6);
+    expect(Math.abs(left.z - right.z)).toBeGreaterThan(
+      Math.abs(left.x - right.x),
+    );
+  });
+
+  it("stores the explicit left/right rung in the skid trail", () => {
+    const fx = new VehicleFX();
+    const pos = { x: 4, y: 0, z: -7 };
+    const left = { x: 3.15, y: 0, z: -5.65 };
+    const right = { x: 4.85, y: 0, z: -5.65 };
+    fx.update(DT, { slip: 0.3, speed: 20, pos, left, right });
+    expect(fx.skids.segmentCount).toBe(1);
+    const rung = fx.skids.segment(0);
+    expect(rung?.left).toEqual(left);
+    expect(rung?.right).toEqual(right);
+  });
+
+  it("falls back to anchor.x +/- 0.8 when left/right are absent", () => {
+    const fx = new VehicleFX();
+    const pos = { x: 4, y: 1, z: -7 };
+    fx.update(DT, { slip: 0.3, speed: 20, pos });
+    expect(fx.skids.segmentCount).toBe(1);
+    const rung = fx.skids.segment(0);
+    expect(rung?.left).toEqual({ x: 3.2, y: 1, z: -7 });
+    expect(rung?.right).toEqual({ x: 4.8, y: 1, z: -7 });
   });
 });
 
