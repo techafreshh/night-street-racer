@@ -182,6 +182,37 @@ describe("pursuit input", () => {
     expect(lookaheadFor(10)).toBeCloseTo(9, 6);
     expect(lookahead_for).toBe(lookaheadFor);
   });
+
+  it("keeps aligned pursuit at full throttle (off-track factor is 1.0 at angle 0)", () => {
+    const out = aiInput({ speedMs: 10, angle: 0, yawRate: 0, targetSpeed: 28 });
+    expect(out.throttle).toBeCloseTo(1, 6);
+  });
+
+  it("sheds target speed when pointing off-track", () => {
+    // Factor at angle 1.0 is pinned at the 0.35 floor: 28 * 0.35 = 9.8,
+    // err = -0.2 lands inside the deadband so the car coasts instead of
+    // driving forward at full throttle.
+    const off = aiInput({ speedMs: 10, angle: 1.0, yawRate: 0, targetSpeed: 28 });
+    expect(off.throttle).toBe(0);
+    expect(off.brake).toBe(0);
+    const aligned = aiInput({ speedMs: 10, angle: 0, yawRate: 0, targetSpeed: 28 });
+    expect(aligned.throttle).toBeCloseTo(1, 6);
+    // Factor at angle 0.5 is 1.2 - 0.75 = 0.45: 12 * 0.45 = 5.4,
+    // err = -4.6 brakes while the aligned twin drives forward.
+    const mid = aiInput({ speedMs: 10, angle: 0.5, yawRate: 0, targetSpeed: 12 });
+    expect(mid.brake).toBeGreaterThan(0);
+    expect(mid.throttle).toBe(0);
+    const midAligned = aiInput({ speedMs: 10, angle: 0, yawRate: 0, targetSpeed: 12 });
+    expect(midAligned.throttle).toBeGreaterThan(0);
+    expect(midAligned.brake).toBe(0);
+  });
+
+  it("pins the off-track factor at the 0.35 floor", () => {
+    const one = aiInput({ speedMs: 10, angle: 1.0, yawRate: 0, targetSpeed: 28 });
+    const two = aiInput({ speedMs: 10, angle: 2.0, yawRate: 0, targetSpeed: 28 });
+    expect(two.throttle).toBe(one.throttle);
+    expect(two.brake).toBe(one.brake);
+  });
 });
 
 describe("throttle cap", () => {
