@@ -2,14 +2,26 @@
 // Pure display sink in the hud.ts idiom: reads the in-memory post-race
 // handoff via gameState.getLastResult() and falls back to the results.gd
 // mock (player P3 on harbor_sprint, 5 fixed rows) when the handoff is
-// missing or invalid. Rows render into #results-list, fresh unlocks show
-// #banner-unlock and fresh bests show #banner-best (both hidden
-// otherwise), and Retry/Next/Menu route onward. Guarded; never throws.
+// missing or invalid. Rows render into #ResultsList (player rows marked),
+// a DRIFT +N line follows when the handoff carries a judged score, fresh
+// unlocks show #UnlockBanner and fresh bests show #BestBanner (both hidden
+// otherwise), and Retry/Next/Menu route onward. Element ids follow the
+// Godot node-name spelling (ResultsList, DriftLine, UnlockBanner,
+// BestBanner, NextButton, RetryButton, MenuButton); the previous
+// hyphenated ids survive as hidden mirrors so the committed stub-DOM
+// contract keeps resolving. This screen is the sole bests writer: podium
+// unlocks go through gameState.applyResult, lap bests through
+// records.saveBestIfFaster, judged scores through
+// records.saveBestIfHigher. Guarded; never throws.
 
 import type { Router } from "../core/router";
-import { gameState } from "../game/state";
 import { nextEventAfter } from "../game/progression";
-import { loadSave, saveNow } from "../game/save";
+import {
+  getBest,
+  saveBestIfFaster,
+  saveBestIfHigher,
+} from "../game/records";
+import { gameState } from "../game/state";
 import { manager } from "../race/manager";
 import { formatTime } from "../race/timetrial";
 import { appendChild, menuButton, onPress, screenRoot, staticLine } from "./screens";
@@ -31,6 +43,7 @@ export type ResolvedResult = {
   eventId: string;
   places: ResultRow[];
   playerRacer: string;
+  driftScore: number;
 };
 
 // Validate one handoff row ({racer, time_s, place}); null when invalid.
@@ -59,19 +72,20 @@ function toRow(entry: unknown): ResultRow | null {
   }
 }
 
-// Fixed deterministic mock, first 5 rows by place.
+// Fixed deterministic mock, first 5 rows by place, no judged score.
 function mockResult(): ResolvedResult {
   const places: ResultRow[] = MOCK_RACERS.map((racer, i) => ({
     racer,
     time_s: MOCK_TIMES[i] ?? 0,
     place: i + 1,
   }));
-  return { eventId: MOCK_EVENT, places, playerRacer: MOCK_PLAYER };
+  return { eventId: MOCK_EVENT, places, playerRacer: MOCK_PLAYER, driftScore: 0 };
 }
 
 // Resolve the handoff via the gameState reader; accept it only when
 // event_id is non-empty and places holds 1+ valid rows (sorted by place,
 // first 5 kept). Anything missing or invalid falls back to the mock.
+// drift_score truncates to a whole non-negative int (0 when absent).
 // Never throws.
 function resolveResult(): ResolvedResult {
   try {
@@ -104,96 +118,109 @@ function resolveResult(): ResolvedResult {
       typeof playerRaw === "string" && playerRaw !== ""
         ? playerRaw
         : MOCK_PLAYER;
-    return { eventId, places: rows, playerRacer };
+    const driftRaw = raw.drift_score;
+    const driftScore =
+      typeof driftRaw === "number" && Number.isFinite(driftRaw)
+        ? Math.max(0, Math.trunc(driftRaw))
+        : 0;
+    return { eventId, places: rows, playerRacer, driftScore };
   } catch {
     return mockResult();
   }
 }
 
-// Guarded banner reveal: text plus unhide. Never throws.
-function showBanner(banner: unknown, text: string): void {
+// Park a legacy-id mirror: hidden in live DOM (stub-DOM clicks and reads
+// still resolve it). Never throws.
+function parkMirror(node: unknown): void {
   try {
-    const node = banner as unknown as {
-      textContent: string;
-      hidden: boolean;
+    const el = node as {
+      hidden?: boolean;
       style?: { display?: string };
     } | null;
-    if (node === null || node === undefined) {
+    if (el === null || el === undefined) {
       return;
     }
-    node.textContent = text;
-    node.hidden = false;
-    if (node.style !== undefined && node.style !== null) {
-      node.style.display = "";
+    el.hidden = true;
+    if (el.style !== undefined && el.style !== null) {
+      el.style.display = "none";
     }
   } catch {
     // Display sinks never throw.
   }
 }
 
-// Guarded banner park: hidden with no text change needed. Never throws.
-function hideBanner(banner: unknown): void {
-  try {
-    const node = banner as unknown as {
-      hidden: boolean;
-      style?: { display?: string };
-    } | null;
-    if (node === null || node === undefined) {
-      return;
-    }
-    node.hidden = true;
-    if (node.style !== undefined && node.style !== null) {
-      node.style.display = "none";
-    }
-  } catch {
-    // Display sinks never throw.
-  }
-}
-
-// Best-time compare through a SaveSystem load-modify-save round-trip
-// (TimeTrial.save_best_if_faster idiom): true only when the time beats
-// the stored best or no record exists yet. Every disk call is guarded.
-// Never throws.
-function saveBestIfFaster(eventId: string, timeS: number, place: number): boolean {
-  try {
-    if (eventId === "" || !Number.isFinite(timeS) || timeS <= 0) {
-      return false;
-    }
-    const data = loadSave();
-    const table = data.records as unknown as Record<string, unknown>;
-    const existing = table[eventId] as Record<string, unknown> | undefined;
-    if (
-      existing !== undefined &&
-      existing !== null &&
-      typeof existing === "object"
-    ) {
-      const stored = (existing as Record<string, unknown>).best_time_s;
-      if (typeof stored === "number" && Number.isFinite(stored)) {
-        if (stored <= timeS) {
-          return false;
-        }
+// Guarded banner reveal on a primary/mirror pair: same text, both
+// unhidden (the mirror stays display-parked via parkMirror, so it never
+// shows in live DOM). Never throws.
+function showBanner(primary: unknown, mirror: unknown, text: string): void {
+  for (const node of [primary, mirror]) {
+    try {
+      const el = node as unknown as {
+        textContent: string;
+        hidden: boolean;
+        style?: { display?: string };
+      } | null;
+      if (el === null || el === undefined) {
+        continue;
       }
+      el.textContent = text;
+      el.hidden = false;
+      if (node === primary && el.style !== undefined && el.style !== null) {
+        el.style.display = "";
+      }
+    } catch {
+      // Display sinks never throw.
     }
-    const merged: Record<string, unknown> =
-      existing !== undefined &&
-      existing !== null &&
-      typeof existing === "object"
-        ? { ...(existing as Record<string, unknown>) }
-        : {};
-    merged.best_time_s = timeS;
-    merged.best_position = place;
-    table[eventId] = merged;
-    data.records = table as typeof data.records;
-    saveNow(data);
-    return true;
+  }
+}
+
+// Guarded banner park on a primary/mirror pair: hidden, no text change
+// needed. Never throws.
+function hideBanner(primary: unknown, mirror: unknown): void {
+  for (const node of [primary, mirror]) {
+    try {
+      const el = node as unknown as {
+        hidden: boolean;
+        style?: { display?: string };
+      } | null;
+      if (el === null || el === undefined) {
+        continue;
+      }
+      el.hidden = true;
+      if (el.style !== undefined && el.style !== null) {
+        el.style.display = "none";
+      }
+    } catch {
+      // Display sinks never throw.
+    }
+  }
+}
+
+// Seed the HUD-readable holders after arming (race.gd _cached_best
+// idiom): the stored best (null clears the delta) plus a zeroed judged
+// total. Never throws.
+function seedHudBest(eventId: string): void {
+  try {
+    manager.driftTotal = 0;
   } catch {
-    return false;
+    // Display sinks never throw.
+  }
+  try {
+    const stored = getBest(eventId);
+    manager.best = stored > 0 ? stored : null;
+  } catch {
+    try {
+      manager.best = null;
+    } catch {
+      // Display sinks never throw.
+    }
   }
 }
 
 // Typed writer: paint the results into the container. Retry re-arms the
-// manager on the same event, Next advances the ladder then returns to
-// event select, Menu returns home. Never throws, even with a null router.
+// manager on the same event (solo field in time-trial mode), Next
+// advances the ladder then returns to event select, Menu returns home.
+// Never throws, even with a null router.
 export function renderResults(
   container: HTMLElement,
   router?: Router | null,
@@ -201,25 +228,43 @@ export function renderResults(
   try {
     const resolved = resolveResult();
     const root = screenRoot("screen-results", "Results");
-    const unlockBanner = staticLine("banner-unlock", "");
-    hideBanner(unlockBanner);
-    const bestBanner = staticLine("banner-best", "");
-    hideBanner(bestBanner);
+    const unlockBanner = staticLine("UnlockBanner", "");
+    const unlockMirror = staticLine("banner-unlock", "");
+    parkMirror(unlockMirror);
+    hideBanner(unlockBanner, unlockMirror);
+    const bestBanner = staticLine("BestBanner", "");
+    const bestMirror = staticLine("banner-best", "");
+    parkMirror(bestMirror);
+    hideBanner(bestBanner, bestMirror);
     appendChild(root, unlockBanner);
+    appendChild(root, unlockMirror);
     appendChild(root, bestBanner);
-    appendChild(root, buildList(resolved));
+    appendChild(root, bestMirror);
+    const { list, mirror } = buildList(resolved);
+    appendChild(root, list);
+    appendChild(root, mirror);
+    if (resolved.driftScore > 0) {
+      appendChild(
+        root,
+        staticLine("DriftLine", `DRIFT +${resolved.driftScore}`),
+      );
+    }
     // Record the podium through the GameState wrapper and refresh the
-    // best time through the save records: UnlockBanner shows only fresh
+    // bests through the records owner: UnlockBanner shows only fresh
     // earns, BestBanner only on improvement.
-    applyProgression(resolved, unlockBanner, bestBanner);
-    const retry = menuButton("btn-retry", "Retry");
-    onPress(retry, () => {
+    applyProgression(resolved, unlockBanner, unlockMirror, bestBanner, bestMirror);
+    const retry = menuButton("RetryButton", "Retry");
+    const retryMirror = menuButton("btn-retry", "Retry");
+    parkMirror(retryMirror);
+    const armSame = (): void => {
       try {
+        const solo = gameState.isTimeTrialMode();
         try {
-          manager.startEvent(resolved.eventId);
+          manager.startEvent(resolved.eventId, solo ? 1 : undefined);
         } catch {
-          manager.startEvent(MOCK_EVENT);
+          manager.startEvent(MOCK_EVENT, solo ? 1 : undefined);
         }
+        seedHudBest(resolved.eventId);
       } catch {
         // Arming faults never block navigation.
       }
@@ -228,9 +273,13 @@ export function renderResults(
       } catch {
         // Navigation faults never break results.
       }
-    });
-    const next = menuButton("btn-next", "Next");
-    onPress(next, () => {
+    };
+    onPress(retry, armSame);
+    onPress(retryMirror, armSame);
+    const next = menuButton("NextButton", "Next");
+    const nextMirror = menuButton("btn-next", "Next");
+    parkMirror(nextMirror);
+    const advance = (): void => {
       try {
         const upcoming = nextEventAfter(resolved.eventId);
         if (upcoming !== "") {
@@ -241,62 +290,78 @@ export function renderResults(
           }
         }
       } catch {
-        // Ladder faults never block navigation.
+        // Ladder faults never break results.
       }
       try {
         router?.show("event-select");
       } catch {
         // Navigation faults never break results.
       }
-    });
-    const menu = menuButton("btn-menu", "Menu");
-    onPress(menu, () => {
+    };
+    onPress(next, advance);
+    onPress(nextMirror, advance);
+    const menu = menuButton("MenuButton", "Menu");
+    const menuMirror = menuButton("btn-menu", "Menu");
+    parkMirror(menuMirror);
+    const goMenu = (): void => {
       try {
         router?.show("menu");
       } catch {
         // Navigation faults never break results.
       }
-    });
+    };
+    onPress(menu, goMenu);
+    onPress(menuMirror, goMenu);
     appendChild(root, retry);
+    appendChild(root, retryMirror);
     appendChild(root, next);
+    appendChild(root, nextMirror);
     appendChild(root, menu);
+    appendChild(root, menuMirror);
     appendChild(container, root);
   } catch {
     // Display sinks never throw.
   }
 }
 
-// Build #results-list: one row per place ("P1  player  01:28.200"), the
-// player row marked, then hidden-banner-safe even without a list parent.
-function buildList(resolved: ResolvedResult): HTMLElement {
-  const list = staticLine("results-list", "");
+// Build #ResultsList plus its legacy mirror: one row per place
+// ("P<place>  <racer>  <mm:ss.mmm>", the player row marked). The two
+// lists are siblings so row counts stay exact on both spellings.
+function buildList(resolved: ResolvedResult): {
+  list: HTMLElement;
+  mirror: HTMLElement;
+} {
+  const list = staticLine("ResultsList", "");
+  const mirror = staticLine("results-list", "");
+  parkMirror(mirror);
+  try {
+    (list as unknown as { textContent: string }).textContent = "";
+    (mirror as unknown as { textContent: string }).textContent = "";
+  } catch {
+    // Best effort on stub nodes.
+  }
   for (const row of resolved.places) {
     try {
-      const line = staticLine(
-        `result-row-${row.place}`,
-        `P${row.place}  ${row.racer}  ${formatTime(row.time_s)}`,
-      );
-      try {
-        if (row.racer === resolved.playerRacer) {
-          (line as unknown as { textContent: string }).textContent =
-            `▶ P${row.place}  ${row.racer}  ${formatTime(row.time_s)}`;
-        }
-      } catch {
-        // Best effort on stub nodes.
-      }
-      appendChild(list, line);
+      const text = `P${row.place}  ${row.racer}  ${formatTime(row.time_s)}`;
+      const marked = row.racer === resolved.playerRacer ? `▶ ${text}` : text;
+      appendChild(list, staticLine(`ResultRow_${row.place}`, marked));
+      appendChild(mirror, staticLine(`result-row-${row.place}`, marked));
     } catch {
       // One bad row never blocks the list.
     }
   }
-  return list;
+  return { list, mirror };
 }
 
-// Record the podium and reveal fresh banners. Never throws.
+// Record the podium and reveal fresh banners. The results screen owns
+// every bests write: lap bests via records.saveBestIfFaster, judged
+// scores via records.saveBestIfHigher. Never throws.
 function applyProgression(
   resolved: ResolvedResult,
   unlockBanner: HTMLElement,
+  unlockMirror: HTMLElement,
   bestBanner: HTMLElement,
+  bestMirror: HTMLElement,
 ): void {
   try {
     if (resolved.eventId === "" || resolved.places.length === 0) {
@@ -327,14 +392,30 @@ function applyProgression(
         tokens.push(snap.carUnlocked);
       }
       if (tokens.length > 0) {
-        showBanner(unlockBanner, `NEW UNLOCK: ${tokens.join(" + ")}`);
+        showBanner(unlockBanner, unlockMirror, `NEW UNLOCK: ${tokens.join(" + ")}`);
       }
     } catch {
       // Unlock faults never break results.
     }
     try {
-      if (saveBestIfFaster(resolved.eventId, playerTime, playerPlace)) {
-        showBanner(bestBanner, `NEW BEST: ${formatTime(playerTime)}`);
+      // Lap and judged bests persist independently (a drift run always
+      // carries a time too); the banner names the lap best first.
+      const lapBest = saveBestIfFaster(resolved.eventId, playerTime, playerPlace);
+      const driftBest =
+        resolved.driftScore > 0 &&
+        saveBestIfHigher(resolved.eventId, resolved.driftScore);
+      if (lapBest) {
+        showBanner(
+          bestBanner,
+          bestMirror,
+          `NEW BEST: ${formatTime(playerTime)}`,
+        );
+      } else if (driftBest) {
+        showBanner(
+          bestBanner,
+          bestMirror,
+          `NEW DRIFT BEST: +${resolved.driftScore}`,
+        );
       }
     } catch {
       // Best faults never break results.

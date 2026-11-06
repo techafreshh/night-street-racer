@@ -12,6 +12,7 @@
 import type { Router } from "../core/router";
 import { getTune } from "../data/tunes";
 import { LADDER, mappedCar } from "../game/progression";
+import { getBest } from "../game/records";
 import { gameState } from "../game/state";
 import { manager } from "../race/manager";
 import { COLOR_COUNT, colorCss } from "../vehicles/paint";
@@ -477,10 +478,21 @@ export function renderGarage(
         if (eventId === "") {
           eventId = "harbor_sprint";
         }
+        // Solo time-trial arms a 1-racer field (no AI); race mode arms
+        // the full event field. The HUD-readable holders seed here:
+        // stored best (null clears the delta) plus a zeroed drift total.
+        const solo = gameState.isTimeTrialMode();
         try {
-          manager.startEvent(eventId);
+          manager.startEvent(eventId, solo ? 1 : undefined);
         } catch {
-          manager.startEvent("harbor_sprint");
+          manager.startEvent("harbor_sprint", solo ? 1 : undefined);
+        }
+        try {
+          manager.driftTotal = 0;
+          const stored = getBest(eventId);
+          manager.best = stored > 0 ? stored : null;
+        } catch {
+          // Holder faults never block navigation.
         }
       } catch {
         // Arming faults never block navigation.
