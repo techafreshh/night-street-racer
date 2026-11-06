@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-budget.mjs",
     "serve": "vite preview",
     "start": "vite preview",
     "smoke": "node scripts/smoke.mjs",

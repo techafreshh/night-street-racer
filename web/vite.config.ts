@@ -37,6 +37,29 @@ function healthPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [healthPlugin()],
+  build: {
+    // Loading-budget ceiling (issue #226): the entry chunk stays lean
+    // via code-split screens in main.ts; the two heavy static imports
+    // split into vendor chunks. assetsInlineLimit stays at the Vite
+    // default on purpose: the -compat WASM is already base64-embedded
+    // same-origin with zero fetch, and inlining tiny SVG/CSS keeps the
+    // request count down.
+    chunkSizeWarningLimit: 15000,
+    reportCompressedSize: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string): string | undefined {
+          if (id.includes("node_modules/three/")) {
+            return "vendor-three";
+          }
+          if (id.includes("@dimforge/rapier3d-compat")) {
+            return "vendor-rapier";
+          }
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     port: Number(process.env.PORT ?? DEFAULT_PORT),
     host: true,
