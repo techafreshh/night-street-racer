@@ -223,6 +223,14 @@ const FALLBACK_MAX_LIGHTS_PER_MESH = 8;
 const FALLBACK_TONE_MAPPING = 4;
 const FALLBACK_ROAD_EW_LIP = 0.02;
 const FALLBACK_ROAD_WIDTH = 8.0;
+const FALLBACK_PITCH = 68.0;
+const FALLBACK_BLOCK_SIZE = 60.0;
+const FALLBACK_DISTRICT_HALF = 140.0;
+
+// Stock-shape grid check mirroring render/city.ts checkGrid verbatim
+// (same fields, aliases, and finite-number picks) so the pre-stage
+// validateCityGrid fallback rejects non-stock grids exactly as the
+// live module does once stage C lands.
 
 // Analytic ground-top fallback mirroring render/city.ts groundTopY
 // (EW road strips carry the anti-z-fighting lip, datum elsewhere).
@@ -238,6 +246,51 @@ function fallbackGroundTopY(x: number, z: number): number {
   } catch {
     return 0;
   }
+}
+
+function fallbackCheckGrid(grid: Record<string, unknown>): boolean {
+  const pick = (value: unknown, fallback: number): number =>
+    typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  const pitch = pick(grid.pitch ?? grid.PITCH, FALLBACK_PITCH);
+  const blockSize = pick(
+    grid.blockSize ?? grid.block_size ?? grid.BLOCK_SIZE,
+    FALLBACK_BLOCK_SIZE,
+  );
+  const roadWidth = pick(
+    grid.roadWidth ?? grid.road_width ?? grid.ROAD_WIDTH,
+    FALLBACK_ROAD_WIDTH,
+  );
+  const half = pick(
+    grid.districtHalf ?? grid.district_half ?? grid.DISTRICT_HALF,
+    FALLBACK_DISTRICT_HALF,
+  );
+  const lip = pick(
+    grid.roadEwLip ?? grid.road_ew_lip ?? grid.ROAD_EW_LIP,
+    FALLBACK_ROAD_EW_LIP,
+  );
+  const centers = (grid.blockCenters ??
+    grid.block_centers ??
+    grid.BLOCK_CENTERS ??
+    FALLBACK_BLOCK_CENTERS) as unknown;
+  const lines = (grid.centerlines ??
+    grid.centerLines ??
+    grid.roadCenterlines ??
+    grid.road_centerlines ??
+    grid.ROAD_CENTERLINES ??
+    FALLBACK_ROAD_CENTERLINES) as unknown;
+  const equals = (value: unknown, stock: readonly number[]): boolean =>
+    Array.isArray(value) &&
+    value.length === stock.length &&
+    (value as unknown[]).every((entry, index) => entry === stock[index]);
+  return (
+    pitch === FALLBACK_PITCH &&
+    blockSize === FALLBACK_BLOCK_SIZE &&
+    roadWidth === FALLBACK_ROAD_WIDTH &&
+    half === FALLBACK_DISTRICT_HALF &&
+    lip === FALLBACK_ROAD_EW_LIP &&
+    equals(centers, FALLBACK_BLOCK_CENTERS) &&
+    equals(lines, FALLBACK_ROAD_CENTERLINES)
+  );
 }
 
 // Probe-facing AI namespace: the pure racing-line / pursuit / rubber-band
@@ -1578,7 +1631,17 @@ function publishCity(): CityNamespace {
     } catch {
       // Fall through to the stock-shape fallback.
     }
-    return grid === undefined || grid === null || typeof grid === "object";
+    try {
+      if (grid === undefined || grid === null) {
+        return fallbackCheckGrid({});
+      }
+      if (typeof grid !== "object") {
+        return false;
+      }
+      return fallbackCheckGrid(grid as Record<string, unknown>);
+    } catch {
+      return false;
+    }
   };
   return {
     get centerlines(): readonly number[] {
@@ -2449,11 +2512,21 @@ async function bootEngineStages(
   } catch {
     // Progress faults never break boot.
   }
-  // Stage B: drive plus city bodies (auto, no click-to-load).
+  // Stage B: drive plus city bodies (auto, no click-to-load). The city
+  // statics module must land before either init: initDrive's ground
+  // callback mounts city ground+barrier colliders into the drive world,
+  // and initCityPhysics early-returns while engine.city is null.
   try {
     engine.vehicleMod = await import("./vehicles/vehicle");
   } catch {
     // The drive stays unarmed; the menu stays alive.
+  }
+  try {
+    if (engine.city === null) {
+      engine.city = await import("./render/city");
+    }
+  } catch {
+    // The city statics stay unmounted; the menu stays alive.
   }
   await initDrive();
   await initCityPhysics();
@@ -2461,7 +2534,6 @@ async function bootEngineStages(
   try {
     const [
       threeMod,
-      cityMod,
       effectsMod,
       composerMod,
       lightsMod,
@@ -2471,7 +2543,6 @@ async function bootEngineStages(
       perfMod,
     ] = await Promise.all([
       import("three"),
-      import("./render/city"),
       import("./render/effects"),
       import("./render/composer"),
       import("./render/lights"),
@@ -2481,7 +2552,6 @@ async function bootEngineStages(
       import("./render/perf"),
     ]);
     engine.three = threeMod;
-    engine.city = cityMod;
     engine.effects = effectsMod;
     engine.composer = composerMod;
     engine.lights = lightsMod;
@@ -2492,6 +2562,17 @@ async function bootEngineStages(
   } catch {
     // WebGL unavailable (headless without GPU): menu stays.
   }
+  // Belt-and-suspenders: if the stage-B city import raced or failed but
+  // the module resolves now, build the probe bodies (no-op when the
+  // stage-B initCityPhysics already built them).
+  try {
+    if (engine.city === null) {
+      engine.city = await import("./render/city");
+    }
+  } catch {
+    // The city statics stay unmounted; the menu stays alive.
+  }
+  await initCityPhysics();
   migrateFlash();
   try {
     if (flashElement === null && engine.effects !== null) {
