@@ -16,6 +16,7 @@ import { getBest } from "../game/records";
 import { gameState } from "../game/state";
 import { manager } from "../race/manager";
 import { armGridForEvent } from "../race/grid";
+import { placePlayerOnGrid } from "../race/placement";
 import { sharedTraffic } from "../traffic/traffic";
 import { COLOR_COUNT, colorCss } from "../vehicles/paint";
 import { appendChild, menuButton, onPress, screenRoot, staticLine } from "./screens";
@@ -505,6 +506,13 @@ export function renderGarage(
           armGridForEvent(effective, { carId, solo });
         } catch {
           // Grid faults never block navigation.
+        }
+        // Player placement mirrors main.ts startRace: pin the live body
+        // onto the shared grid slot once per arm. Guarded like arming.
+        try {
+          placePlayerOnGrid();
+        } catch {
+          // Placement faults never block navigation.
         }
         try {
           sharedTraffic().setActive(!solo);
