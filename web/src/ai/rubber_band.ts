@@ -121,6 +121,7 @@ export const compute_aid = computeAid;
 export const rubber_band = rubberBand;
 
 // Wrapped leader-minus-own arc distance on a loop of `total` metres.
+// Gaps past half the loop return 0, matching the Godot seam guard.
 // Without a positive loop length there is nothing to wrap, so the raw
 // difference (or 0 when non-finite) is returned instead of crashing.
 export function wrapGap(leaderArc: unknown, ownArc?: unknown, total?: unknown): number {
@@ -148,7 +149,9 @@ export function wrapGap(leaderArc: unknown, ownArc?: unknown, total?: unknown): 
   if (!Number.isFinite(t) || t <= 0) {
     return l - o;
   }
-  return fposmod(l - o, t);
+  const gap = fposmod(l - o, t);
+  if (gap > t * 0.5) return 0;
+  return gap;
 }
 
 // v1 snake_case alias (same reference).
