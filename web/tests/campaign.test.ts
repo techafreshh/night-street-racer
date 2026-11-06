@@ -312,6 +312,102 @@ describe("pause hotkey scope", () => {
       }
     }
   });
+
+  it("hides a race-visible overlay on navigation without a keypress", () => {
+    // Same captured-keydown plus stub-Router rig as the scope test above.
+    const captured = new Map<string, Array<(e?: unknown) => void>>();
+    const prior = (globalThis as unknown as { addEventListener?: unknown }).addEventListener;
+    (globalThis as unknown as { addEventListener: unknown }).addEventListener = (
+      type: string,
+      listener: (e?: unknown) => void,
+    ): void => {
+      const list = captured.get(type) ?? [];
+      list.push(listener);
+      captured.set(type, list);
+    };
+    try {
+      const { element } = makeContainer(doc);
+      const router = new Router(element);
+      for (const name of ["menu", "event-select", "garage", "settings", "results", "race"]) {
+        router.register(name, () => {});
+      }
+      const pause = attachPause(element, router);
+      // Given a visible overlay on race, navigating off-race hides it.
+      router.show("race");
+      for (const name of ["menu", "event-select", "garage", "settings", "results"]) {
+        pause.setVisible(true);
+        router.show(name);
+        expect(pause.isVisible()).toBe(false);
+        expect((pause.element as unknown as StubNode | null)?.hidden).toBe(true);
+      }
+      // Entering race never auto-pauses.
+      pause.setVisible(false);
+      router.show("race");
+      expect(pause.isVisible()).toBe(false);
+      // Unknown names still throw without hiding a visible overlay.
+      pause.setVisible(true);
+      expect(() => router.show("nope")).toThrow();
+      expect(pause.isVisible()).toBe(true);
+    } finally {
+      if (prior === undefined) {
+        try {
+          delete (globalThis as unknown as { addEventListener?: unknown }).addEventListener;
+        } catch {
+          // Best effort.
+        }
+      } else {
+        (globalThis as unknown as { addEventListener: unknown }).addEventListener = prior;
+      }
+    }
+  });
+
+  it("dismisses a leaked overlay on non-race Escape and stays hidden", () => {
+    // Same captured-keydown plus stub-Router rig as the scope test above.
+    const captured = new Map<string, Array<(e?: unknown) => void>>();
+    const prior = (globalThis as unknown as { addEventListener?: unknown }).addEventListener;
+    (globalThis as unknown as { addEventListener: unknown }).addEventListener = (
+      type: string,
+      listener: (e?: unknown) => void,
+    ): void => {
+      const list = captured.get(type) ?? [];
+      list.push(listener);
+      captured.set(type, list);
+    };
+    try {
+      const { element } = makeContainer(doc);
+      const router = new Router(element);
+      for (const name of ["menu", "event-select", "garage", "settings", "results", "race"]) {
+        router.register(name, () => {});
+      }
+      const pause = attachPause(element, router);
+      const fireEscape = (): void => {
+        for (const listener of [...(captured.get("keydown") ?? [])]) {
+          listener({ key: "Escape" });
+        }
+      };
+      // Given a leaked overlay forced visible over a non-race screen,
+      // Escape dismisses it instead of leaving it stuck.
+      router.show("results");
+      pause.setVisible(true);
+      fireEscape();
+      expect(pause.isVisible()).toBe(false);
+      expect((pause.element as unknown as StubNode | null)?.hidden).toBe(true);
+      // And a second Escape never re-surfaces it off-race.
+      fireEscape();
+      expect(pause.isVisible()).toBe(false);
+      expect((pause.element as unknown as StubNode | null)?.hidden).toBe(true);
+    } finally {
+      if (prior === undefined) {
+        try {
+          delete (globalThis as unknown as { addEventListener?: unknown }).addEventListener;
+        } catch {
+          // Best effort.
+        }
+      } else {
+        (globalThis as unknown as { addEventListener: unknown }).addEventListener = prior;
+      }
+    }
+  });
 });
 
 describe("fps meter", () => {
