@@ -500,6 +500,13 @@ export function aiInput(...args: unknown[]): AiDrive {
       target = LINE_TOP;
     }
   }
+  // Off-track slowdown (Godot parity): shed target speed when pointing
+  // off-track — mirrors scripts/ai/ai_input.gd
+  // `target *= clampf(1.2 - absf(ang) * 1.5, 0.35, 1.0)`. At angle 0 the
+  // factor is exactly 1.0 so aligned pursuit is unaffected.
+  if (Number.isFinite(target) && Number.isFinite(angle)) {
+    target = (target as number) * clamp(1.2 - Math.abs(angle as number) * 1.5, 0.35, 1.0);
+  }
   const steer = clamp(-STEER_GAIN * (angle as number) - ANG_DAMP * (yawRate as number), -1, 1);
   const err = (target as number) - (speed as number);
   // Cornering-load throttle cap (Godot parity): lat_load = max(|yawRate| *
