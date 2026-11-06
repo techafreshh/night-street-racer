@@ -92,6 +92,7 @@ import { GameState, gameState } from "./game/state";
 import * as loaders from "./render/loaders";
 import type { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { PASS_NAMES, createNightComposer } from "./render/composer";
+import { sampleDrawCalls } from "./render/perf";
 import {
   MAX_LIGHTS_PER_MESH,
   buildLightRig,
@@ -364,6 +365,8 @@ export type LightingNamespace = {
   readonly composer: EffectComposer | null;
   readonly passes: readonly string[];
   readonly pass_names: readonly string[];
+  readonly drawCalls: number;
+  readonly draw_calls: number;
   readonly rig: LightRig | null;
   readonly counts: { total: number; maxPerMesh: number };
   readonly toneMapping: number;
@@ -382,6 +385,12 @@ function publishLighting(): LightingNamespace {
     },
     passes: PASS_NAMES,
     pass_names: PASS_NAMES,
+    get drawCalls(): number {
+      return sampleDrawCalls(nightRenderer) ?? 0;
+    },
+    get draw_calls(): number {
+      return sampleDrawCalls(nightRenderer) ?? 0;
+    },
     get rig(): LightRig | null {
       return lightRig;
     },

@@ -10,6 +10,7 @@
     "dev": "vite",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build && node scripts/check-budget.mjs",
+    "build:zip": "npm run build && cd dist && zip -r ../dist.zip .",
     "serve": "vite preview",
     "start": "vite preview",
     "smoke": "node scripts/smoke.mjs",

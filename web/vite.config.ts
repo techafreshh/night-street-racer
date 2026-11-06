@@ -36,6 +36,10 @@ function healthPlugin(): Plugin {
 }
 
 export default defineConfig({
+  // Portable subpath-or-root serving: Pages project sites mount
+  // under /<repo>/ while an unzipped dist.zip is served from /,
+  // so every built URL stays document-relative (./assets/...).
+  base: "./",
   plugins: [healthPlugin()],
   test: {
     // Playwright specs live beside vitest suites; the default vitest
@@ -43,12 +47,18 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
   },
   build: {
+    // Portable static deploy (issue #228): dist/ is the Pages artifact
+    // and the zip root, so the out dir is pinned and always emptied.
+    // assetsInlineLimit 0 keeps every imported byte as a same-origin
+    // file under ./assets (no inline data URIs, no CDN fetch).
+    outDir: "dist",
+    emptyOutDir: true,
+    assetsInlineLimit: 0,
     // Loading-budget ceiling (issue #226): the entry chunk stays lean
     // via code-split screens in main.ts; the two heavy static imports
-    // split into vendor chunks. assetsInlineLimit stays at the Vite
-    // default on purpose: the -compat WASM is already base64-embedded
-    // same-origin with zero fetch, and inlining tiny SVG/CSS keeps the
-    // request count down.
+    // split into vendor chunks. assetsInlineLimit is 0 (see above),
+    // which is safe here because the -compat WASM is already
+    // base64-embedded same-origin with zero fetch.
     chunkSizeWarningLimit: 15000,
     reportCompressedSize: true,
     rollupOptions: {

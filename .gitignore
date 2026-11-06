@@ -9,3 +9,6 @@ build/
 web/dist/
 web/node_modules/
 /node_modules/
+
+# Static deploy artifact (rebuilt by npm run build:zip / Pages job)
+web/dist.zip
