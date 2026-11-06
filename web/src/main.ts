@@ -583,6 +583,10 @@ export type FxNamespace = {
   };
   readonly brakeMaterial: THREE.MeshStandardMaterial;
   readonly brake_material: THREE.MeshStandardMaterial;
+  readonly smokeMesh: THREE.InstancedMesh | null;
+  readonly smoke_mesh: THREE.InstancedMesh | null;
+  readonly skidMesh: THREE.LineSegments | null;
+  readonly skid_mesh: THREE.LineSegments | null;
   readonly flash: HingeFlash;
   readonly flashLevel: number;
   readonly flash_level: number;
@@ -817,6 +821,18 @@ function publishFx(): FxNamespace {
     },
     get brake_material(): THREE.MeshStandardMaterial {
       return ensureBrakeMaterial();
+    },
+    get smokeMesh(): THREE.InstancedMesh | null {
+      return smokeMesh;
+    },
+    get smoke_mesh(): THREE.InstancedMesh | null {
+      return smokeMesh;
+    },
+    get skidMesh(): THREE.LineSegments | null {
+      return skidMesh;
+    },
+    get skid_mesh(): THREE.LineSegments | null {
+      return skidMesh;
     },
     get flash(): HingeFlash {
       return ensureFlash() as HingeFlash;

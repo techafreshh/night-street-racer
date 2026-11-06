@@ -336,3 +336,42 @@ describe("fx module hygiene", () => {
     expect(text).not.toMatch(/require\(\s*[\"']three[\"']\s*\)/);
   });
 });
+
+describe("fx scene mount", () => {
+  function readMain(): string {
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "src");
+    return readFileSync(join(root, "main.ts"), "utf8");
+  }
+
+  it("mounts the smoke and skid meshes to the render scene", () => {
+    const text = readMain();
+    expect(text).toMatch(/scene\.add\(smokeMesh\)/);
+    expect(text).toMatch(/scene\.add\(skidMesh\)/);
+    expect(text).toMatch(/buildSmokeBillboards\(\)/);
+    expect(text).toMatch(/buildSkidMesh\(\)/);
+  });
+
+  it("syncs the live pools into the mounted meshes every tick", () => {
+    const text = readMain();
+    expect(text).toMatch(/syncSmoke\(smokeMesh/);
+    expect(text).toMatch(/syncSkids\(skidMesh/);
+  });
+
+  it("publishes the mounted meshes behind live probe getters", () => {
+    const text = readMain();
+    expect(text).toMatch(/get smokeMesh\(\)/);
+    expect(text).toMatch(/get smoke_mesh\(\)/);
+    expect(text).toMatch(/get skidMesh\(\)/);
+    expect(text).toMatch(/get skid_mesh\(\)/);
+  });
+
+  it("names the mounted meshes so probes can check scene membership", () => {
+    const smoke = buildSmokeBillboards();
+    expect(smoke.name).toBe("smoke-billboards");
+    expect(smoke.count).toBe(SMOKE_MAX);
+    smoke.geometry.dispose();
+    const skids = buildSkidMesh();
+    expect(skids.name).toBe("skid-marks");
+    skids.geometry.dispose();
+  });
+});
