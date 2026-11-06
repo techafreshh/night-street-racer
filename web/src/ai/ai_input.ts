@@ -6,7 +6,10 @@
 // handbrake/reset flags Vehicle.step reads), so it assigns directly onto
 // Vehicle.inputs. A minimal XZ projection core is duplicated locally (kept
 // import-free like the race ports) so end-to-end samples carrying the line
-// plus the car pose resolve without a second module.
+// plus the car pose resolve without a second module. The cornering-load
+// throttle cap (RacingLine.throttle_cap) is duplicated locally too, so the
+// throttle branch caps full throttle toward the 0.25 floor exactly where
+// the Godot driver would.
 
 export const LOOKAHEAD_BASE = 4.0;
 export const LOOKAHEAD_GAIN = 0.5;
@@ -16,6 +19,11 @@ export const ANG_DAMP = 0.3;
 export const THROTTLE_GAIN = 0.5;
 export const BRAKE_GAIN = 0.4;
 export const DEADBAND = 0.5;
+
+// Local copy of the RacingLine grip budget: the file stays import-free
+// (ai hygiene gate), so the cap math below cannot import GRIP_BUDGET.
+const CAP_GRIP = 9.0;
+const CAP_FLOOR = 0.25;
 
 const LINE_TOP = 28.0;
 
@@ -34,6 +42,16 @@ type Pt = {
 
 function clamp(value: number, lo: number, hi: number): number {
   return Math.min(Math.max(value, lo), hi);
+}
+
+// Local copy of RacingLine.throttle_cap: linear headroom against the
+// grip budget, floored so bad input can never zero the throttle.
+function capFor(latLoad: number, grip: number): number {
+  if (!Number.isFinite(latLoad)) {
+    return 1.0;
+  }
+  const budget = Number.isFinite(grip) ? grip : CAP_GRIP;
+  return clamp(1 - Math.abs(latLoad) / Math.max(budget, 0.01), CAP_FLOOR, 1.0);
 }
 
 function fposmod(value: number, mod: number): number {
@@ -175,6 +193,66 @@ function pointAtLocal(pts: Pt[], s: number, closed: boolean): Pt {
   }
   const last = closed ? pts[0] : pts[n - 1];
   return { x: last.x, z: last.z };
+}
+
+// Nearest waypoint index to a position (XZ only); mirrors
+// racing_line.ts closestIndex over the local Pt shape.
+function closestIndexOf(pts: Pt[], p: Pt): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < pts.length; i += 1) {
+    const dx = p.x - pts[i].x;
+    const dz = p.z - pts[i].z;
+    if (!Number.isFinite(dx) || !Number.isFinite(dz)) {
+      continue;
+    }
+    const d = dx * dx + dz * dz;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+// Heading-change curvature at point i over mean segment length (0 on
+// straights, ~1/R on arcs); mirrors racing_line.ts curvatureOf so
+// geometry-carrying samples derive the same kappa without an import.
+function curvatureOfLocal(pts: Pt[], index: number, closed: boolean): number {
+  const n = pts.length;
+  if (n < 3) {
+    return 0;
+  }
+  if (!Number.isFinite(index)) {
+    return 0;
+  }
+  const i = Math.trunc(index);
+  if (i < 0 || i >= n) {
+    return 0;
+  }
+  if (!closed && (i <= 0 || i >= n - 1)) {
+    return 0;
+  }
+  const prev = pts[(i - 1 + n) % n];
+  const cur = pts[i];
+  const nxt = pts[(i + 1) % n];
+  const ax = cur.x - prev.x;
+  const az = cur.z - prev.z;
+  const bx = nxt.x - cur.x;
+  const bz = nxt.z - cur.z;
+  const la = Math.hypot(ax, az);
+  const lb = Math.hypot(bx, bz);
+  if (la < 0.001 || lb < 0.001) {
+    return 0;
+  }
+  const cross = ax * bz - az * bx;
+  const dot = ax * bx + az * bz;
+  const ang = Math.abs(Math.atan2(cross, dot));
+  const avg = (la + lb) * 0.5;
+  if (!Number.isFinite(ang) || avg < 0.001) {
+    return 0;
+  }
+  return ang / avg;
 }
 
 function speedAtLocal(pts: Pt[], sp: number[], s: number, closed: boolean): number {
@@ -424,12 +502,40 @@ export function aiInput(...args: unknown[]): AiDrive {
   }
   const steer = clamp(-STEER_GAIN * (angle as number) - ANG_DAMP * (yawRate as number), -1, 1);
   const err = (target as number) - (speed as number);
+  // Cornering-load throttle cap (Godot parity): lat_load = max(|yawRate| *
+  // |speed|, speed^2 * kappa) with kappa = max(curv(carIdx), curv(lookIdx)).
+  // Explicit bag keys win; geometry kappa applies when line points plus a
+  // car pose are present; flat harness calls fall back to the yaw term.
+  const latExplicit = firstFinite(bag, ["latLoad", "lat_load", "latAccel", "lat_accel", "lateralLoad", "lateral_load"]);
+  const kappaExplicit = firstFinite(bag, ["kappa", "curvature"]);
+  const grip = firstFinite(bag, ["gripBudget", "grip_budget", "grip"]);
+  const spd = speed as number;
+  const yaw = yawRate as number;
+  let lat = Math.abs(yaw) * Math.abs(spd);
+  if (Number.isFinite(latExplicit)) {
+    lat = latExplicit;
+  } else {
+    let kappa = kappaExplicit;
+    if (!Number.isFinite(kappa) && pts.length >= 3 && carPos !== null) {
+      const carIdx = closestIndexOf(pts, carPos);
+      let lookPt = lookExplicit;
+      if (lookPt === null) {
+        lookPt = pointAtLocal(pts, arcOfLocal(pts, carPos, closed) + lookaheadFor(spd), closed);
+      }
+      const lookIdx = closestIndexOf(pts, lookPt);
+      kappa = Math.max(curvatureOfLocal(pts, carIdx, closed), curvatureOfLocal(pts, lookIdx, closed));
+    }
+    if (Number.isFinite(kappa as number)) {
+      lat = Math.max(lat, spd * spd * (kappa as number));
+    }
+  }
+  const thrCap = capFor(lat, grip);
   if (!Number.isFinite(err) || !Number.isFinite(steer)) {
     return coast;
   }
   if (err > DEADBAND) {
     return {
-      throttle: clamp(err * THROTTLE_GAIN, 0, 1),
+      throttle: Math.min(clamp(err * THROTTLE_GAIN, 0, 1), thrCap),
       brake: 0,
       steer,
       handbrake: false,

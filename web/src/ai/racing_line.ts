@@ -183,6 +183,27 @@ export function rawSpeed(kappa: unknown, grip?: unknown, top?: unknown, low?: un
 // v1 snake_case alias (same reference).
 export const raw_speed = rawSpeed;
 
+// Grip budget for the cornering-load throttle cap (distinct from the
+// LATERAL_ACCEL bake budget): the rear friction circle headroom left for
+// drive force once lateral demand is accounted for.
+export const GRIP_BUDGET = 9.0;
+
+// Throttle cap from cornering load: linear headroom against the grip
+// budget keeps the combined force inside the friction circle, so full
+// throttle while cornering hard does not power-oversteer. Port of
+// RacingLine.throttle_cap (0 -> 1, >=budget -> 0.25 floor).
+export function throttleCap(latAccel: unknown, grip?: unknown): number {
+  const lat = typeof latAccel === "number" ? latAccel : NaN;
+  if (!Number.isFinite(lat)) {
+    return 1.0;
+  }
+  const budget = finiteOr(grip, GRIP_BUDGET);
+  return clamp(1 - Math.abs(lat) / Math.max(budget, 0.01), 0.25, 1.0);
+}
+
+// v1 snake_case alias (same reference).
+export const throttle_cap = throttleCap;
+
 // Per-point target speeds with a backward braking pass over segment arc
 // lengths, so the car brakes before corners instead of arriving too hot.
 // Loops iterate to convergence (at most n passes); open lines take one

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   BRAKE_DECEL,
+  GRIP_BUDGET,
   LATERAL_ACCEL,
   MAX_SPEED,
   MIN_SPEED,
@@ -28,6 +29,8 @@ import {
   rawSpeed,
   raw_speed,
   speedAtArc,
+  throttleCap,
+  throttle_cap,
   trackLength,
 } from "../src/ai/racing_line";
 import { aiInput, ai_input, lookaheadFor, lookahead_for } from "../src/ai/ai_input";
@@ -178,6 +181,49 @@ describe("pursuit input", () => {
     expect(lookaheadFor(30)).toBe(16);
     expect(lookaheadFor(10)).toBeCloseTo(9, 6);
     expect(lookahead_for).toBe(lookaheadFor);
+  });
+});
+
+describe("throttle cap", () => {
+  it("matches the Godot throttle_cap curve with a 0.25 floor", () => {
+    expect(GRIP_BUDGET).toBe(9.0);
+    expect(throttleCap(0)).toBe(1);
+    expect(throttleCap(4.5)).toBeCloseTo(0.5, 6);
+    expect(throttleCap(9)).toBe(0.25);
+    expect(throttleCap(20)).toBe(0.25);
+    expect(throttleCap(NaN)).toBe(1);
+    expect(throttle_cap).toBe(throttleCap);
+  });
+
+  it("leaves straight-line pursuit uncapped", () => {
+    const out = aiInput({ speedMs: 10, angle: 0, yawRate: 0, targetSpeed: 28 });
+    expect(out.throttle).toBeGreaterThan(0.3);
+    expect(out.throttle).toBeCloseTo(1, 6);
+  });
+
+  it("caps a high-yaw flat call that previously returned full throttle", () => {
+    const out = aiInput({ speedMs: 20, angle: 0, yawRate: 1.5, targetSpeed: 28 });
+    expect(out.throttle).toBeLessThan(1);
+    expect(out.throttle).toBeCloseTo(0.25, 6);
+  });
+
+  it("caps end-to-end corner geometry at speed", () => {
+    const tight = [
+      { x: 0, z: 0 },
+      { x: 10, z: 0 },
+      { x: 10, z: 10 },
+      { x: 0, z: 10 },
+    ];
+    const out = aiInput({
+      speedMs: 20,
+      angle: 0,
+      yawRate: 0,
+      targetSpeed: 28,
+      points: tight,
+      carPos: { x: 10, z: 0 },
+    });
+    expect(out.throttle).toBeLessThan(1);
+    expect(out.throttle).toBeCloseTo(0.25, 6);
   });
 });
 
