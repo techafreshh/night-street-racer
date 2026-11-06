@@ -82,6 +82,12 @@ import { createFog, loadEnvironment } from "./render/sky";
 import { Traffic, type CarState, type TrafficCar } from "./traffic/traffic";
 import * as hud from "./ui/hud";
 import * as minimap from "./ui/minimap";
+import { renderEventSelect } from "./ui/eventSelect";
+import { renderGarage } from "./ui/garage";
+import { renderMenu } from "./ui/menu";
+import { attachPause } from "./ui/pause";
+import { renderResults } from "./ui/results";
+import { renderSettings } from "./ui/settings";
 import { getEvent } from "./data/events";
 import * as drift from "./race/drift";
 import * as order from "./race/order";
@@ -334,50 +340,6 @@ const raceEmitter = createRaceEmitter();
 // Monotonic fixed-step counter mirrored to window.__fixedSteps.
 let fixedSteps = 0;
 let loop: LoopHandle | null = null;
-
-interface MenuEvent {
-  routeId: string;
-  locked: boolean;
-}
-
-// Placeholder event roster mirroring MenuUI.EVENT_PATHS; every entry is
-// locked until the progression ladder lands in a later lap.
-const MENU_EVENTS: MenuEvent[] = [
-  { routeId: "harbor_sprint", locked: true },
-  { routeId: "downtown_gp", locked: true },
-  { routeId: "neon_loop", locked: true },
-  { routeId: "bayline_circuit", locked: true },
-  { routeId: "alley_sprint", locked: true },
-  { routeId: "drift_park", locked: true },
-];
-
-function renderMenu(ui: HTMLElement): void {
-  const menu = document.createElement("div");
-  menu.className = "menu";
-
-  const title = document.createElement("h1");
-  title.textContent = "Night Street Racer";
-  menu.appendChild(title);
-
-  for (const label of ["Race", "Garage", "Settings", "Quit"]) {
-    const button = document.createElement("button");
-    button.id = `${label}Button`;
-    button.type = "button";
-    button.textContent = label;
-    menu.appendChild(button);
-  }
-
-  const list = document.createElement("ul");
-  list.className = "event-list";
-  for (const event of MENU_EVENTS) {
-    const item = document.createElement("li");
-    item.textContent = event.locked ? `${event.routeId} 🔒 Locked` : event.routeId;
-    list.appendChild(item);
-  }
-  menu.appendChild(list);
-
-  ui.replaceChildren(menu);
-}
 
 function renderRace(ui: HTMLElement): void {
   const race = document.createElement("div");
@@ -1123,9 +1085,22 @@ function boot(): void {
     return;
   }
   const router = new Router(ui);
-  router.register("menu", renderMenu);
+  router.register("menu", (container) => renderMenu(container, router));
+  router.register("event-select", (container) =>
+    renderEventSelect(container, router),
+  );
+  router.register("garage", (container) => renderGarage(container, router));
+  router.register("settings", (container) =>
+    renderSettings(container, router),
+  );
+  router.register("results", (container) => renderResults(container, router));
   router.register("race", renderRace);
   router.show("menu");
+  try {
+    attachPause(ui, router);
+  } catch {
+    // The pause overlay is additive; the menu stays without it.
+  }
   try {
     hud.ensureHud(document);
   } catch {
@@ -1168,6 +1143,35 @@ function boot(): void {
       raceEmitter.emit("onRaceStateChanged", { state });
     } catch {
       // Signal faults must never break boot.
+    }
+    // Finished while the race screen is up: hand the standings to the
+    // results screen (race.gd _on_finished scene-change idiom) so a
+    // completed run always lands on #screen-results. Guarded so routing
+    // faults never break the fixed step.
+    if (state === "finished") {
+      try {
+        if (router.current() === "race") {
+          const results = raceManager.results;
+          if (results !== null && results !== undefined) {
+            try {
+              gameState.setLastResult({
+                event_id: results.eventId,
+                player_racer: "player",
+                places: results.places.map((row) => ({
+                  racer: row.racer,
+                  time_s: row.time_s,
+                  place: row.place,
+                })),
+              });
+            } catch {
+              // Handoff faults fall back to the results mock.
+            }
+          }
+          router.show("results");
+        }
+      } catch {
+        // Results routing never breaks the race.
+      }
     }
   };
   raceManager.onCheckpoint = (index): void => {
